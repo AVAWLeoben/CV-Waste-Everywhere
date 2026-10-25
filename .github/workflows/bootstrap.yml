@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     if: github.repository == 'AVAWLeoben/CV-Waste-Everywhere' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
       contents: write
