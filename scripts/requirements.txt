@@ -8,7 +8,7 @@ onnx2tf==1.26.3
 onnx-graphsurgeon==0.5.8
 sng4onnx==1.0.4
 onnxslim==0.1.71
-ai-edge-litert==1.2.0
+ai-edge-litert==1.4.0
 protobuf==5.29.5
 ftfy==6.3.1
 regex==2024.11.6
