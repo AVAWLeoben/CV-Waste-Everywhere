@@ -1,1 +1,382 @@
-test
+# Paste this entire file into .github/workflows/bootstrap.yml on main.
+# Then select Settings > Pages > Source: GitHub Actions, and run this workflow.
+# No personal token, ZIP upload or ChatGPT integration is required.
+name: Waste app — bootstrap and deploy
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'auto: try YOLO-World, fall back to a clearly labelled YOLO stand-in'
+        type: choice
+        options: [auto, world, standin]
+        default: auto
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: waste-pages
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'AVAWLeoben/CV-Waste-Everywhere' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write
+    env:
+      TF_CPP_MIN_LOG_LEVEL: '2'
+      TF_NUM_INTEROP_THREADS: '1'
+      TF_NUM_INTRAOP_THREADS: '2'
+      OMP_NUM_THREADS: '2'
+      MODEL_CHOICE: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Create missing application source files
+        shell: python
+        run: |
+          from pathlib import Path
+          files = {}
+          files['README-WASTE.md'] = r'''# Waste Everywhere — first prototype
+          
+          German/English rear-camera-only advisory app. Camera frames and selected photos stay on the device. The browser downloads TFLite model and runtime assets. There is no image upload, crowdsourcing, analytics or server inference.
+          
+          ## iPhone setup
+          
+          1. Create `.github/workflows/bootstrap.yml` from the supplied workflow and commit it to `main`.
+          2. Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+          3. Actions → **Waste app — bootstrap and deploy** → Run workflow (branch `main`, model `auto`).
+          4. Wait for the build and deploy jobs. Open https://avawleoben.github.io/CV-Waste-Everywhere/ in Safari and allow the rear camera.
+          
+          If source commit permissions fail, check Settings → Actions → General → Workflow permissions. Repository rules may also require permitting this workflow's source commit. No personal access token is needed. Do not enable bypasses on unrelated repositories.
+          
+          The workflow is restricted to AVAWLeoben/CV-Waste-Everywhere and main. It creates only missing app files, preserves existing edits, commits those named files, and builds/deploys in the same run. It never writes another workflow file. On later edits, run it manually again. Model binaries are deployment artifacts, not Git commits.
+          
+          ## Model behavior
+          
+          `auto` tries YOLOv8s-World v2 with fixed vocabulary from `web/config.json`. If conversion or numerical checks fail, it tries conventional YOLOv8s. This fallback shows object predictions only and is clearly marked in the UI; it never assigns a bin. Select `world` to require YOLO-World with no fallback, or `standin` to test ordinary YOLO explicitly. Conversion logs are retained as workflow artifacts.
+          
+          Models must have float32 NHWC inputs, built-in TFLite operations, embedded class metadata and numerical agreement with PyTorch on three synthetic inputs. A Chromium test checks rear-only camera constraints, language persistence, narrow layout and actual TFLite inference through the pinned browser runtime. These checks do not establish classification accuracy or iPhone speed. The device/backend and time are shown under Test details.
+          
+          No front camera picker or permissive camera fallback exists. If the rear camera cannot be opened, select a photo. Backgrounding the page stops its camera. Three consistent live detections stabilize the result; no detection or conflicting disposal destinations clear the advice. Unknown is never mapped to residual waste.
+          
+          The prompts are experimental. Packaging versus non-packaging, deposit status, reusable bottles and municipal biowaste rules remain limitations. Advice is conditional. Check https://www.oesterreich.gv.at/de/themen/bauen_und_wohnen/abfall and https://www.recycling-pfand.at/ . The app does not determine deposit status from bottle shape.
+          
+          ## Editing
+          
+          Edit files in `web/` or `scripts/` through GitHub's web editor, then run this workflow again. Existing source files are not overwritten by the embedded bootstrap. The cache key includes the export script, requirements, vocabulary and selected mode. To retry an unchanged failed World export after an `auto` fallback, choose `world` or clear the model cache.
+          
+          Application code: AGPL-3.0-or-later (https://www.gnu.org/licenses/agpl-3.0.html). Ultralytics, YOLO-World, CLIP and other dependencies retain their upstream licenses and notices. The runtime versions follow the AVAWLeoben YOLO Classroom LiteRT demo; the DSL repository is not changed. No user photo is included.
+          '''
+          files['scripts/browser_test.mjs'] = r'''// SPDX-License-Identifier: AGPL-3.0-or-later
+          import {chromium} from 'playwright';
+          import assert from 'node:assert/strict';
+          import {spawn} from 'node:child_process';
+          import {writeFileSync,readFileSync} from 'node:fs';
+          const server=spawn('python3',['-m','http.server','8000','--bind','127.0.0.1'],{stdio:'ignore'});
+          let browser;
+          try{
+           for(let n=0;n<40;n++){try{if((await fetch('http://127.0.0.1:8000/site/')).ok)break;}catch{}await new Promise(r=>setTimeout(r,250));}
+           browser=await chromium.launch({args:['--enable-unsafe-webgpu','--use-angle=swiftshader']});
+           const context=await browser.newContext({viewport:{width:390,height:844}});const page=await context.newPage();
+           await page.addInitScript(()=>{window.requests=[];Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async c=>{window.requests.push(c);throw new DOMException('No rear camera','OverconstrainedError');}}});});
+           await page.goto('http://127.0.0.1:8000/site/');await page.locator('#start').click();
+           await page.waitForFunction(()=>document.querySelector('#status').classList.contains('error'));
+           const requests=await page.evaluate(()=>window.requests);assert.equal(requests.length,1);assert.deepEqual(requests[0].video.facingMode,{exact:'environment'});
+           await page.locator('#language').click();assert.equal(await page.locator('#start').textContent(),'Start rear camera');
+           await page.reload();assert.equal(await page.locator('#start').textContent(),'Start rear camera');
+           assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await context.close();
+           const live=await browser.newPage({viewport:{width:390,height:844}});await live.goto('http://127.0.0.1:8000/site/');
+           const png=await live.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=320;const g=c.getContext('2d');g.fillStyle='#cedac2';g.fillRect(0,0,320,320);g.fillStyle='#345d47';g.fillRect(110,40,100,240);return c.toDataURL().split(',')[1];});
+           await live.locator('#image').setInputFiles({name:'synthetic-test.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+           let d,success=false;
+           for(let n=0;n<240;n++){
+             d=JSON.parse(await live.locator('#diagnostics').textContent());if(d.error)throw Error(d.error);
+             if(d.completed>0){success=true;break;}await new Promise(r=>setTimeout(r,1000));
+           }
+           assert(success,'Model did not complete browser inference within four minutes');
+           const path='site/models/validation.json';const report=JSON.parse(readFileSync(path));report.browser={engine:'Chromium',backend:d.backend,completed:true};writeFileSync(path,JSON.stringify(report,null,2));
+           console.log('Rear-camera constraints, language, layout and real browser inference passed.',d);
+          }finally{await browser?.close();server.kill();}
+          '''
+          files['scripts/export_model.py'] = r'''# SPDX-License-Identifier: AGPL-3.0-or-later
+          """Export in a child process; publish only after TFLite numerical checks pass."""
+          import argparse, json, os, subprocess, sys
+          from pathlib import Path
+          ROOT=Path(__file__).resolve().parents[1]
+          p=argparse.ArgumentParser();p.add_argument('--candidate',choices=['world','standin']);p.add_argument('--choice',choices=['auto','world','standin'],default='auto');a=p.parse_args()
+          (ROOT/'model-work').mkdir(exist_ok=True);out=ROOT/'build/models';out.mkdir(parents=True,exist_ok=True)
+          if not a.candidate:
+              for mode in (['world','standin'] if a.choice=='auto' else [a.choice]):
+                  log=ROOT/'model-work'/f'{mode}.log'
+                  print(f'Attempting {mode}',flush=True)
+                  with log.open('w') as f:
+                      try: ok=subprocess.run([sys.executable,__file__,'--candidate',mode],stdout=f,stderr=subprocess.STDOUT,timeout=1500).returncode==0
+                      except subprocess.TimeoutExpired: ok=False
+                  print(log.read_text()[-18000:],flush=True)
+                  if ok:
+                      summary=os.environ.get('GITHUB_STEP_SUMMARY')
+                      if summary:
+                          with open(summary,'a') as f:f.write(f'## Model\nSelected: **{mode}**. Conversion checks passed.\n')
+                      if mode=='standin':print('::warning::General YOLO stand-in selected. The app gives object labels only, not bin advice.')
+                      sys.exit(0)
+              sys.exit('No candidate passed export and numerical checks; nothing will deploy.')
+          
+          import copy,hashlib,shutil,zipfile
+          import numpy as np
+          import torch
+          from ultralytics import YOLO,YOLOWorld
+          from ai_edge_litert.interpreter import Interpreter
+          os.chdir(ROOT/'model-work');torch.set_num_threads(2)
+          config=json.loads((ROOT/'web/config.json').read_text());prompts=[c['prompt'] for c in config['classes']]
+          checkpoint='yolov8s-worldv2.pt' if a.candidate=='world' else 'yolov8s.pt'
+          model=(YOLOWorld if a.candidate=='world' else YOLO)(checkpoint)
+          if a.candidate=='world':model.set_classes(prompts)
+          reference=copy.deepcopy(model.model).eval().float()
+          export=Path(model.export(format='tflite',imgsz=320,batch=1,half=False,int8=False,nms=False,device='cpu',opset=17))
+          file=export if export.is_file() else next(export.glob('*_float32.tflite'))
+          i=Interpreter(model_path=str(file),num_threads=2);i.allocate_tensors()
+          inputs=i.get_input_details();outputs=i.get_output_details()
+          assert len(inputs)==len(outputs)==1
+          assert list(inputs[0]['shape'])==[1,320,320,3]
+          assert inputs[0]['dtype']==outputs[0]['dtype']==np.float32
+          ops=sorted({x['op_name'] for x in i._get_ops_details()})
+          assert not any(x.startswith('Flex') or x=='CUSTOM' for x in ops),'Custom/Flex operations cannot be shipped'
+          rng=np.random.default_rng(42);checks=[]
+          xs=[np.zeros((1,320,320,3),np.float32),rng.random((1,320,320,3),dtype=np.float32),np.tile(np.linspace(0,1,320,dtype=np.float32)[None,None,:,None],(1,320,1,3))]
+          for x in xs:
+              with torch.inference_mode():
+                  y=reference(torch.from_numpy(x.transpose(0,3,1,2).copy()))
+                  expected=(y[0] if isinstance(y,tuple) else y).numpy()
+              i.set_tensor(inputs[0]['index'],x);i.invoke();actual=i.get_tensor(outputs[0]['index'])
+              if actual.shape!=expected.shape and actual.transpose(0,2,1).shape==expected.shape:actual=actual.transpose(0,2,1)
+              assert actual.shape==expected.shape and np.isfinite(actual).all()
+              # Ultralytics TFLite exports normalize decoded coordinates to input size.
+              actual=actual.copy();actual[:,:4,:]*=320
+              np.testing.assert_allclose(actual[:,:4,:],expected[:,:4,:],rtol=.003,atol=.25)
+              np.testing.assert_allclose(actual[:,4:,:],expected[:,4:,:],rtol=.005,atol=.002)
+              checks.append({'maxBoxErrorPixels':float(abs(actual[:,:4,:]-expected[:,:4,:]).max()),'maxScoreError':float(abs(actual[:,4:,:]-expected[:,4:,:]).max())})
+          with zipfile.ZipFile(file) as z: metadata=json.loads(z.read('metadata.json'))
+          assert metadata['task']=='detect'
+          names=prompts if a.candidate=='world' else list(model.names.values())
+          assert [metadata['names'][str(k)] for k in range(len(names))]==names
+          shutil.copyfile(file,out/'waste_320.tflite')
+          manifest={'file':'waste_320.tflite','mode':a.candidate,'model':checkpoint,'prompts':prompts if a.candidate=='world' else [],'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
+          (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
+          (out/'validation.json').write_text(json.dumps({'checks':checks,'ops':ops,'input':inputs[0]['shape'].tolist(),'output':outputs[0]['shape'].tolist(),'mobileTested':False},indent=2))
+          print(json.dumps(manifest,indent=2))
+          '''
+          files['scripts/requirements.txt'] = r'''ultralytics==8.3.221
+          numpy==1.26.4
+          onnx==1.17.0
+          onnxruntime==1.20.1
+          tensorflow==2.19.0
+          tf-keras==2.19.0
+          onnx2tf==1.26.3
+          onnx-graphsurgeon==0.5.8
+          sng4onnx==1.0.4
+          onnxslim==0.1.71
+          ai-edge-litert==1.2.0
+          protobuf==5.29.5
+          ftfy==6.3.1
+          regex==2024.11.6
+          tqdm==4.67.1
+          '''
+          files['web/app.js'] = r'''// SPDX-License-Identifier: AGPL-3.0-or-later
+          const $=id=>document.getElementById(id);
+          const words={
+           de:{eyebrow:'WENIGER RÄTSELN. BESSER TRENNEN.',heading:'Zeig uns, was du entsorgen möchtest.',intro:'Ein Gegenstand. Deine Rückkamera. Eine erste Orientierung.',privacy:'● Bleibt auf deinem Gerät',start:'Rückkamera starten',stop:'Kamera stoppen',chooseText:'Oder ein Foto auswählen',resultTitle:'DEINE SORTIERHILFE',ready:'Bereit, wenn du es bist.',search:'Gegenstand ins Bild halten',steady:'Kurz ruhig halten …',uncertain:'Noch nicht eindeutig',loading:'Erkennung wird vorbereitet. Der erste Download kann etwas dauern …',active:'Erkennung läuft lokal auf deinem Gerät.',stopped:'Kamera gestoppt.',cameraError:'Rückkamera nicht verfügbar. Kamerazugriff in Safari erlauben oder ein Foto auswählen.',modelError:'Erkennung konnte nicht geladen werden. Bitte erneut versuchen.',imageError:'Foto konnte nicht geöffnet werden.',inferError:'Erkennung unterbrochen. Bitte neu starten.',generic:'Objekt erkannt. Dieses Testmodell bestimmt noch keine passende Sammlung.',world:'Experimentelle Erkennung. Empfehlung und Ausnahmen bitte prüfen.',standin:'Testmodus: allgemeines YOLO-Modell. Objekterkennung ohne Entsorgungsempfehlung.',footer:'Prototyp für Österreich. Bilder werden nicht hochgeladen oder gesammelt. Unsichere Ergebnisse sind keine Entsorgungsempfehlung.',rules:'Offizielle Informationen zur Mülltrennung ↗'},
+           en:{eyebrow:'LESS GUESSING. BETTER SORTING.',heading:'Show us what you want to throw away.',intro:'One item. Your rear camera. A little guidance.',privacy:'● Stays on your device',start:'Start rear camera',stop:'Stop camera',chooseText:'Or choose a photo',resultTitle:'YOUR SORTING GUIDE',ready:'Ready when you are.',search:'Hold one item in view',steady:'Hold still for a moment …',uncertain:'Not clear yet',loading:'Preparing recognition. The first download may take a while …',active:'Recognition is running locally on your device.',stopped:'Camera stopped.',cameraError:'Rear camera unavailable. Allow camera access in Safari or choose a photo.',modelError:'Could not load recognition. Please try again.',imageError:'Could not open this photo.',inferError:'Recognition interrupted. Please restart.',generic:'Object detected. This test model does not determine its collection stream yet.',world:'Experimental recognition. Check the suggestion and exceptions.',standin:'Test mode: general YOLO model. Object recognition without disposal advice.',footer:'Prototype for Austria. Images are not uploaded or collected. Uncertain results are not disposal advice.',rules:'Official waste-sorting information ↗'}
+          };
+          const bins={
+           yellow:{de:['Gelbe Tonne / Gelber Sack','Nur restentleerte Verpackungen. Bei Getränkeflaschen und -dosen zuerst Pfand prüfen.'],en:['Yellow bin / yellow bag','Emptied packaging only. Check beverage bottles and cans for a deposit first.']},
+           deposit:{de:['Zuerst Pfand prüfen','Mit österreichischem Pfandzeichen: leer und unzerdrückt zurückgeben. Ohne Zeichen: Verpackungssammlung prüfen.'],en:['Check the deposit first','With the Austrian deposit mark: return empty and uncrushed. Otherwise check packaging collection rules.']},
+           clear:{de:['Weißglas – sofern kein Mehrweg','Nur restentleerte, farblose Glasverpackungen. Mehrwegflaschen zurückgeben. Keine Trinkgläser.'],en:['Clear glass – unless returnable','Emptied, colourless glass packaging only. Return reusable bottles. No drinking glasses.']},
+           colored:{de:['Buntglas – sofern kein Mehrweg','Nur restentleerte, farbige Glasverpackungen. Mehrwegflaschen zurückgeben. Keine Trinkgläser.'],en:['Coloured glass – unless returnable','Emptied, coloured glass packaging only. Return reusable bottles. No drinking glasses.']},
+           paper:{de:['Altpapier – wenn geeignet','Sauberes Papier und Karton. Beschichtete Verpackungen, Getränkekartons und verschmutztes Papier gesondert prüfen.'],en:['Paper collection – if suitable','Clean paper and cardboard. Check coated packaging, beverage cartons and soiled paper separately.']},
+           bio:{de:['Biotonne – örtliche Regeln prüfen','Unverpackte Obst-, Gemüse- und Pflanzenreste. Andere Speisereste werden nicht überall angenommen.'],en:['Organic waste – check local rules','Unpackaged fruit, vegetable and plant scraps. Other food leftovers are not accepted everywhere.']},
+           special:{de:['Getrennte Rückgabe / Sammelstelle','Batterien und Elektrogeräte getrennt abgeben. Nicht in Restmüll, Biotonne oder Verpackungssammlung.'],en:['Separate return / collection point','Return batteries and electronics separately. Keep out of residual, organic and packaging bins.']}
+          };
+          const common={bottle:'Flasche',person:'Person',cup:'Becher / Tasse',bowl:'Schüssel',banana:'Banane',apple:'Apfel',orange:'Orange',chair:'Stuhl',book:'Buch','cell phone':'Mobiltelefon'};
+          let lang='de';try{lang=localStorage.getItem('waste-lang')||'de';}catch{}if(!words[lang])lang='de';
+          let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0,previous=null,count=0,last=0;
+          let state='ready',status='',error='',item=null;const diagnostics={};
+          function render(){
+           document.documentElement.lang=lang;
+           for(const id of ['eyebrow','heading','intro','privacy','start','stop','chooseText','resultTitle','footer','rules'])$(id).textContent=words[lang][id];
+           $('language').textContent=lang==='de'?'EN':'DE';$('status').textContent=words[lang][status]||'';$('status').classList.toggle('error',!!error);
+           $('destination').textContent='';$('advice').textContent='';$('name').textContent=words[lang][state]||'';
+           if(item){const c=manifest.mode==='world'?config.classes[item.cls]:null;const name=item.name||String(item.cls);$('name').textContent=c?.[lang]||(lang==='de'?common[name]:null)||name;if(c&&bins[c.bin]){[$('destination').textContent,$('advice').textContent]=bins[c.bin][lang];}else $('advice').textContent=words[lang].generic;}
+           $('notice').textContent=manifest?words[lang][manifest.mode]:'';$('diagnostics').textContent=JSON.stringify({...diagnostics,backend:model?.device,error:error||undefined},null,2);
+          }
+          function setStatus(key,e=''){status=key;error=e;render();}
+          function reset(){previous=null;count=0;item=null;state='search';const c=$('overlay');c.getContext('2d').clearRect(0,0,c.width,c.height);render();}
+          async function json(path){const r=await fetch(path);if(!r.ok)throw Error(`${path}: HTTP ${r.status}`);return r.json();}
+          async function ensureModel(){
+           if(model)return model;if(loading)return loading;
+           loading=(async()=>{setStatus('loading');[config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;render();
+           if(manifest.mode==='world'&&JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
+           const {YOLO}=await import('@ultralytics/yolo');const r=await fetch('./models/'+manifest.file);if(!r.ok)throw Error(`Model HTTP ${r.status}`);
+           model=await YOLO.load(new File([await r.blob()],manifest.file),{device:'auto',litertWasmUrl:'https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/'});return model;})();
+           try{return await loading;}finally{loading=null;}
+          }
+          function stop(){epoch++;stream?.getTracks().forEach(t=>t.stop());stream=null;source=null;mode=null;$('video').srcObject=null;$('video').hidden=true;$('photo').hidden=true;$('placeholder').hidden=false;$('stop').hidden=true;$('start').hidden=false;reset();state='ready';setStatus('stopped');}
+          $('stop').onclick=stop;
+          $('start').onclick=async()=>{
+           stop();const token=epoch;$('start').disabled=true;
+           try{if(!navigator.mediaDevices?.getUserMedia)throw Error('Camera unavailable');
+           const next=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{exact:'environment'},width:{ideal:1280},height:{ideal:720}}});
+           if(token!==epoch){next.getTracks().forEach(t=>t.stop());return;}
+           if(next.getVideoTracks()[0]?.getSettings().facingMode==='user'){next.getTracks().forEach(t=>t.stop());throw Error('Rear camera required');}
+           stream=next;$('video').srcObject=next;await $('video').play();if(token!==epoch)return;
+           source=$('video');mode='camera';$('video').hidden=false;$('placeholder').hidden=true;$('stop').hidden=false;$('start').hidden=true;
+           }catch(e){if(token===epoch){stop();setStatus('cameraError',e.message);}return;}finally{$('start').disabled=false;}
+           try{await ensureModel();if(token===epoch)setStatus('active');}catch(e){if(token===epoch)setStatus('modelError',e.message);}
+          };
+          $('image').onchange=async()=>{
+           const file=$('image').files[0];if(!file)return;stop();const token=epoch;if(photoURL)URL.revokeObjectURL(photoURL);photoURL=URL.createObjectURL(file);
+           try{$('photo').src=photoURL;await $('photo').decode();if(token!==epoch)return;source=$('photo');mode='photo';$('photo').hidden=false;$('placeholder').hidden=true;}
+           catch(e){setStatus('imageError',e.message);return;}
+           try{await ensureModel();if(token===epoch)setStatus('active');}catch(e){if(token===epoch)setStatus('modelError',e.message);}finally{$('image').value='';}
+          };
+          $('language').onclick=()=>{lang=lang==='de'?'en':'de';try{localStorage.setItem('waste-lang',lang);}catch{}render();};
+          function iou(a,b){const area=x=>(x.x2-x.x1)*(x.y2-x.y1);const overlap=Math.max(0,Math.min(a.x2,b.x2)-Math.max(a.x1,b.x1))*Math.max(0,Math.min(a.y2,b.y2)-Math.max(a.y1,b.y1));return overlap/(area(a)+area(b)-overlap)||0;}
+          function draw(b,w,h){const c=$('overlay'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.round(r.width*d);c.height=Math.round(r.height*d);if(!b)return;const ctx=c.getContext('2d');ctx.scale(d,d);const s=Math.min(r.width/w,r.height/h),dx=(r.width-s*w)/2,dy=(r.height-s*h)/2;ctx.lineWidth=3;ctx.strokeStyle='#bcf28f';ctx.strokeRect(dx+b.x1*s,dy+b.y1*s,(b.x2-b.x1)*s,(b.y2-b.y1)*s);}
+          async function tick(now){
+           requestAnimationFrame(tick);if(!model||!source||busy||document.hidden||error||now-last<250)return;
+           const src=source,token=epoch,w=src.videoWidth||src.naturalWidth,h=src.videoHeight||src.naturalHeight;if(!w||!h)return;busy=true;last=now;
+           try{const t=performance.now(),r=await model.predict(src,{conf:config.confidence,iou:.65});if(token!==epoch)return;diagnostics.inferenceMs=Math.round(performance.now()-t);diagnostics.completed=(diagnostics.completed||0)+1;
+           const rw=r.width||w,rh=r.height||h,boxes=(r.boxes||[]).filter(b=>b.conf>=config.confidence&&[b.x1,b.y1,b.x2,b.y2].every(Number.isFinite)&&b.x2>b.x1&&b.y2>b.y1);
+           const rank=b=>(b.x2-b.x1)*(b.y2-b.y1)/(rw*rh)*.65+(1-Math.min(1,Math.hypot((b.x1+b.x2)/2/rw-.5,(b.y1+b.y2)/2/rh-.5)*2))*.25+b.conf*.1;
+           boxes.sort((a,b)=>rank(b)-rank(a));const b=boxes[0];item=null;
+           if(!b){previous=null;count=0;state='search';draw(null,rw,rh);}
+           else if(manifest.mode==='world'&&boxes.some(x=>x!==b&&Math.abs(x.conf-b.conf)<.08&&iou(b,x)>.6&&config.classes[x.cls]?.bin!==config.classes[b.cls]?.bin)){previous=null;count=0;state='uncertain';draw(null,rw,rh);}
+           else{count=previous&&previous.cls===b.cls&&iou(previous,b)>.35?count+1:1;previous=b;state='steady';if(count>=3||mode==='photo')item=b;draw(b,rw,rh);}render();
+           }catch(e){if(token===epoch){reset();setStatus('inferError',e.message);}}finally{busy=false;}
+          }
+          document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)stop();});window.addEventListener('pagehide',()=>{stop();if(photoURL)URL.revokeObjectURL(photoURL);});render();requestAnimationFrame(tick);
+          '''
+          files['web/config.json'] = r'''{"confidence":0.25,"classes":[
+          {"prompt":"plastic packaging","de":"Kunststoffverpackung","en":"Plastic packaging","bin":"yellow"},
+          {"prompt":"metal packaging","de":"Metallverpackung","en":"Metal packaging","bin":"yellow"},
+          {"prompt":"beverage carton","de":"Getränkekarton","en":"Beverage carton","bin":"yellow"},
+          {"prompt":"plastic beverage bottle","de":"Kunststoff-Getränkeflasche","en":"Plastic beverage bottle","bin":"deposit"},
+          {"prompt":"beverage can","de":"Getränkedose","en":"Beverage can","bin":"deposit"},
+          {"prompt":"clear glass bottle","de":"Farblose Glasflasche","en":"Clear glass bottle","bin":"clear"},
+          {"prompt":"colored glass bottle","de":"Farbige Glasflasche","en":"Coloured glass bottle","bin":"colored"},
+          {"prompt":"clear glass jar","de":"Farbloses Verpackungsglas","en":"Clear glass jar","bin":"clear"},
+          {"prompt":"colored glass jar","de":"Farbiges Verpackungsglas","en":"Coloured glass jar","bin":"colored"},
+          {"prompt":"paper","de":"Papier","en":"Paper","bin":"paper"},
+          {"prompt":"cardboard","de":"Karton","en":"Cardboard","bin":"paper"},
+          {"prompt":"fruit and vegetable scraps","de":"Obst- und Gemüsereste","en":"Fruit and vegetable scraps","bin":"bio"},
+          {"prompt":"plant waste","de":"Pflanzenreste","en":"Plant waste","bin":"bio"},
+          {"prompt":"battery","de":"Batterie","en":"Battery","bin":"special"},
+          {"prompt":"electronic device","de":"Elektrogerät","en":"Electronic device","bin":"special"}]}
+          '''
+          files['web/index.html'] = r'''<!doctype html>
+          <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#173f32"><title>Waste Everywhere</title><link rel="stylesheet" href="style.css">
+          <script type="importmap">{"imports":{"@ultralytics/yolo":"https://esm.sh/@ultralytics/yolo@0.0.49","@litertjs/core":"https://esm.sh/@litertjs/core@2.5.3","@litertjs/wasm-utils":"https://esm.sh/@litertjs/wasm-utils@2.5.3"}}</script></head>
+          <body><main><header><b>↻ WASTE EVERYWHERE</b><button id="language" aria-label="Switch language">EN</button></header><p class="eyebrow" id="eyebrow"></p><h1 id="heading"></h1><p id="intro"></p>
+          <section id="camera"><video id="video" playsinline autoplay muted hidden></video><img id="photo" alt="Selected item" hidden><canvas id="overlay"></canvas><div id="placeholder">◎</div><span id="privacy"></span></section>
+          <button id="start" class="primary"></button><button id="stop" class="primary" hidden></button><label class="choose"><span id="chooseText"></span><input id="image" type="file" accept="image/*"></label><p id="status" role="status"></p>
+          <section class="result" aria-live="polite"><p class="eyebrow" id="resultTitle"></p><h2 id="name"></h2><h3 id="destination"></h3><p id="advice"></p></section><p id="notice"></p>
+          <footer><p id="footer"></p><a id="rules" href="https://www.oesterreich.gv.at/de/themen/bauen_und_wohnen/abfall" target="_blank" rel="noopener"></a> · <a href="https://github.com/AVAWLeoben/CV-Waste-Everywhere">Source / Quellcode</a><details><summary>Test details</summary><pre id="diagnostics">{}</pre></details></footer>
+          </main><script type="module" src="app.js"></script></body></html>
+          '''
+          files['web/style.css'] = r'''/* SPDX-License-Identifier: AGPL-3.0-or-later */
+          :root{font-family:system-ui,-apple-system,sans-serif;color:#173f32;background:#f6f7f1}*{box-sizing:border-box}body{margin:0}main{max-width:650px;margin:auto;padding:24px 22px max(30px,env(safe-area-inset-bottom))}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:36px}header b{font-size:13px;letter-spacing:1px}button{font:inherit;min-height:46px;cursor:pointer;border:0;border-radius:12px}#language{width:48px;background:#e1e9db;color:#173f32}.eyebrow{font-size:10px;font-weight:750;letter-spacing:1.7px;color:#69836b}h1{font-size:clamp(30px,7vw,42px);line-height:1.12;letter-spacing:-1.2px;margin:12px 0}#intro{color:#687968;line-height:1.6;font-size:15px;margin-bottom:24px}#camera{position:relative;aspect-ratio:4/4.5;max-height:530px;background:#e2e9dc;border-radius:24px;overflow:hidden;display:grid;place-items:center}video,img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#15281e}canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}#placeholder{font-size:100px;font-weight:200;color:#8da48e}#privacy{position:absolute;bottom:14px;background:#f6faefe8;border-radius:30px;padding:8px 14px;font-size:11px}.primary{width:100%;padding:16px;background:#173f32;color:white;font-weight:650;margin-top:16px}button:disabled{opacity:.5}.choose{display:block;text-align:center;font-size:13px;text-decoration:underline;text-underline-offset:4px;padding:15px;cursor:pointer}.choose input{position:absolute;width:1px;height:1px;clip-path:inset(50%)}#status{text-align:center;font-size:12px;line-height:1.5;min-height:20px;color:#647663}#status.error{color:#a43b2a}.result{padding:22px;border:1px solid #dce5d6;background:white;border-radius:20px}.result h2{font-size:24px;margin:12px 0}.result h3{font-size:19px;color:#39734e}.result p{line-height:1.5}#advice{font-size:14px;color:#667666}#notice{font-size:12px;line-height:1.6;color:#816c41}footer{border-top:1px solid #dce5d6;margin-top:24px;padding-top:12px;font-size:11px;line-height:1.7;color:#6b7c6a}a{color:inherit}details{margin-top:16px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px}[hidden]{display:none!important}:focus-visible{outline:3px solid #8abd79;outline-offset:3px}@media(min-width:600px){#camera{aspect-ratio:4/3}}
+          '''
+          for name, content in files.items():
+              path = Path(name)
+              if path.exists():
+                  print(f"Preserving existing {name}")
+                  continue
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_text(content, encoding="utf-8")
+              print(f"Created {name}")
+      - name: Commit application source (no workflow files or model binaries)
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README-WASTE.md web/index.html web/style.css web/app.js web/config.json scripts/export_model.py scripts/requirements.txt scripts/browser_test.mjs
+          if ! git diff --cached --quiet; then
+            git commit -m "Bootstrap rear-camera waste advisory app"
+            git push origin HEAD:main
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check source syntax and vocabulary
+        run: |
+          node --check web/app.js
+          node --check scripts/browser_test.mjs
+          python -m py_compile scripts/export_model.py
+          python -c "import json; c=json.load(open('web/config.json')); p=[x['prompt'] for x in c['classes']]; assert len(p)==len(set(p)); assert 0<c['confidence']<1"
+      - uses: actions/cache@v4
+        id: model-cache
+        with:
+          path: build/models
+          key: waste-tflite-bootstrap-v1-${{ inputs.model }}-${{ hashFiles('scripts/export_model.py', 'scripts/requirements.txt', 'web/config.json') }}
+      - name: Install conversion tools
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r scripts/requirements.txt
+          python -m pip install 'git+https://github.com/ultralytics/CLIP.git@7ffa84b3bfa40c42ecc1c77147a855e69cb2dd40'
+      - name: Export model and validate numerical outputs
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: python scripts/export_model.py --choice "$MODEL_CHOICE"
+      - name: Package static site
+        run: |
+          mkdir -p site
+          cp web/index.html web/style.css web/app.js web/config.json site/
+          cp -r build/models site/models
+          touch site/.nojekyll
+          python -c "import json; print('Selected model:',json.load(open('site/models/manifest.json'))['mode'])"
+      - name: Install browser test tools
+        run: |
+          npm install --no-save --no-package-lock playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Check rear-camera behaviour and real TFLite browser inference
+        timeout-minutes: 8
+        run: node scripts/browser_test.mjs
+      - name: Retain conversion logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversion-logs
+          path: model-work/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Retain model validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: site/models/*.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Publish site
+        id: deployment
+        uses: actions/deploy-pages@v4
