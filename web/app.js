@@ -29,58 +29,42 @@ function setStatus(key,e=''){status=key;error=e;render();}
 function reset(){previous=null;count=0;item=null;state='search';const c=$('overlay');c.getContext('2d').clearRect(0,0,c.width,c.height);render();}
 async function json(path){const r=await fetch(path);if(!r.ok)throw Error(`${path}: HTTP ${r.status}`);return r.json();}
 
-// Compatibility adapter for @ultralytics/yolo@0.0.49 and our NHWC,
-// float32, no-NMS TensorFlow exports. Keep this paired with that pinned version.
-function adaptTensorFlowModel(loaded){
- const backend=loaded.engine?.backend;
- const expected=backend?.model?.getInputDetails?.()[0]?.shape;
- if(!backend?.run||!expected||expected.length!==4||expected[0]!==1||expected[3]!==3){
-  throw Error('Expected a batch-one NHWC TFLite model');
- }
- const height=expected[1],width=expected[2];
- const channels=Object.keys(loaded.names).length+4;
- const originalRun=backend.run.bind(backend);
- backend.run=async(input,shape)=>{
-  const [batch,c,h,w]=shape;
-  if(batch!==1||c!==3||h!==height||w!==width||input.length!==3*h*w){
-   throw Error('Model input dimensions do not match preprocessing');
-  }
-  // Reorder pixel values, not merely the tensor dimensions.
-  const pixels=h*w,nhwc=new Float32Array(input.length);
-  for(let p=0;p<pixels;p++){
-   for(let k=0;k<3;k++)nhwc[p*3+k]=input[k*pixels+p];
-  }
-  const result=await originalRun(nhwc,[1,h,w,3]);
-  const s=result.shapes[0],data=result.outputs[0];
-  if(result.outputs.length!==1||!s||s.length!==3||s[0]!==1||
-     (s[1]!==channels&&s[2]!==channels)||data.length!==s[1]*s[2]){
-   throw Error('Unexpected detection output shape');
-  }
-  // The Rust postprocessor needs channel-first boxes in input-image pixels.
-  // TensorFlow exports normalize x/y/w/h; class confidence stays unchanged.
-  const count=s[1]===channels?s[2]:s[1];
-  const output=new Float32Array(data.length);
-  for(let k=0;k<channels;k++){
-   const scale=k<4?(k%2===0?w:h):1;
-   for(let p=0;p<count;p++){
-    const index=s[1]===channels?k*count+p:p*channels+k;
-    output[k*count+p]=data[index]*scale;
-   }
-  }
-  result.outputs=[output];result.shapes=[[1,channels,count]];
-  return result;
- };
-}
-
+// Classroom model loading: same YOLO.load(File) / predict(image) API as DSL.
+// Keep the JavaScript import map and the WebAssembly assets on 2.5.3.
+let cpuOnly=false;
 async function ensureModel(){
  if(model)return model;if(loading)return loading;
- loading=(async()=>{setStatus('loading');[config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;render();
- if(manifest.mode==='world'&&JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
- const {YOLO}=await import('@ultralytics/yolo');const r=await fetch('./models/'+manifest.file);if(!r.ok)throw Error(`Model HTTP ${r.status}`);
- const loaded=await YOLO.load(new File([await r.blob()],manifest.file),{device:'auto',litertWasmUrl:'https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/'});
- try{adaptTensorFlowModel(loaded);}catch(e){loaded.free?.();throw e;}
- model=loaded;return model;})();
+ loading=(async()=>{
+  setStatus('loading');
+  [config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);
+  if(manifest.pipeline!=='classroom'||manifest.mode!=='world'||manifest.model!=='yolov8s-worldv2.pt')throw Error('Expected the YOLO-World v2 classroom-compatible export');
+  if(JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
+  diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;render();
+  const {YOLO}=await import('@ultralytics/yolo');
+  const response=await fetch(new URL('./models/'+manifest.file,location.href));
+  if(!response.ok)throw Error(`Model HTTP ${response.status}`);
+  const file=new File([await response.blob()],manifest.file,{type:'application/octet-stream'});
+  model=await YOLO.load(file,{
+   device:cpuOnly?'cpu':'webgpu',
+   litertWasmUrl:'https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/'
+  });
+  return model;
+ })();
  try{return await loading;}finally{loading=null;}
+}
+async function predictWithFallback(src,options){
+ try{return await model.predict(src,options);}
+ catch(e){
+  if(cpuOnly||model?.device!=='webgpu')throw e;
+  // A GPU can compile successfully and still fail when invoking the model.
+  // Retry the entire model on CPU once, using the public loader API.
+  cpuOnly=true;diagnostics.fallback='cpu';diagnostics.gpuError=String(e.message||e);
+  const failed=model;model=null;
+  try{failed.free();}catch{}
+  await ensureModel();
+  const result=await model.predict(src,options);
+  return result;
+ }
 }
 function stop(){epoch++;stream?.getTracks().forEach(t=>t.stop());stream=null;source=null;mode=null;$('video').srcObject=null;$('video').hidden=true;$('photo').hidden=true;$('placeholder').hidden=false;$('stop').hidden=true;$('start').hidden=false;reset();state='ready';setStatus('stopped');}
 $('stop').onclick=stop;
@@ -107,8 +91,9 @@ function draw(b,w,h){const c=$('overlay'),r=c.getBoundingClientRect(),d=devicePi
 async function tick(now){
  requestAnimationFrame(tick);if(!model||!source||busy||document.hidden||error||now-last<250)return;
  const src=source,token=epoch,w=src.videoWidth||src.naturalWidth,h=src.videoHeight||src.naturalHeight;if(!w||!h)return;busy=true;last=now;
- try{const t=performance.now(),r=await model.predict(src,{conf:config.confidence,iou:.65});if(token!==epoch)return;diagnostics.inferenceMs=Math.round(performance.now()-t);diagnostics.completed=(diagnostics.completed||0)+1;
+ try{const t=performance.now(),r=await predictWithFallback(src,{conf:config.confidence,iou:.65});if(token!==epoch)return;status='active';diagnostics.inferenceMs=Math.round(performance.now()-t);diagnostics.completed=(diagnostics.completed||0)+1;
  const rw=r.width||w,rh=r.height||h,boxes=(r.boxes||[]).filter(b=>b.conf>=config.confidence&&[b.x1,b.y1,b.x2,b.y2].every(Number.isFinite)&&b.x2>b.x1&&b.y2>b.y1);
+ diagnostics.detections=boxes.map(({cls,name,conf,x1,y1,x2,y2})=>({cls,name,conf,x1,y1,x2,y2}));
  const rank=b=>(b.x2-b.x1)*(b.y2-b.y1)/(rw*rh)*.65+(1-Math.min(1,Math.hypot((b.x1+b.x2)/2/rw-.5,(b.y1+b.y2)/2/rh-.5)*2))*.25+b.conf*.1;
  boxes.sort((a,b)=>rank(b)-rank(a));const b=boxes[0];item=null;
  if(!b){previous=null;count=0;state='search';draw(null,rw,rh);}

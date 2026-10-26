@@ -1,30 +1,17 @@
-# Waste Everywhere — first prototype
+# Waste Everywhere — YOLO-World v2
 
-German/English rear-camera-only advisory app. Camera frames and selected photos stay on the device. The browser downloads TFLite model and runtime assets. There is no image upload, crowdsourcing, analytics or server inference.
+This app uses `yolov8s-worldv2.pt` with the fixed waste prompts in `web/config.json`, exported to float32 TFLite. The prompts are embedded during export; the browser does not run a text encoder. The prototype does not require a newly annotated training dataset, but sorting accuracy still needs evaluation.
 
-## iPhone setup
+The app reuses the YOLO Classroom demo's `YOLO.load(File)` and `model.predict(image)` interface. The existing classroom repository is read-only and is not deployed or modified by this workflow.
 
-1. Create `.github/workflows/bootstrap.yml` from the supplied workflow and commit it to `main`.
-2. Settings → Pages → Build and deployment → Source: **GitHub Actions**.
-3. Actions → **Waste app — bootstrap and deploy** → Run workflow (branch `main`, model `auto`).
-4. Wait for the build and deploy jobs. Open https://avawleoben.github.io/CV-Waste-Everywhere/ in Safari and allow the rear camera.
+The export adds one built-in TRANSPOSE to accept the classroom runtime's NCHW input. Model weights, class order and normalized output coordinates remain unchanged. The numerical tests compare the final TFLite model with the PyTorch model before deployment.
 
-If source commit permissions fail, check Settings → Actions → General → Workflow permissions. Repository rules may also require permitting this workflow's source commit. No personal access token is needed. Do not enable bypasses on unrelated repositories.
+JavaScript and WebAssembly both use LiteRT 2.5.3. If WebGPU invocation fails, the app reloads the same World model on CPU and retries once. There is no fallback to a conventional YOLO model.
 
-The workflow is restricted to AVAWLeoben/CV-Waste-Everywhere and main. It creates only missing app files, preserves existing edits, commits those named files, and builds/deploys in the same run. It never writes another workflow file. On later edits, run it manually again. Model binaries are deployment artifacts, not Git commits.
+Run **Actions → Waste app - YOLO-World v2 → Run workflow** on `main`. The workflow updates the app sources, exports and validates World, runs browser inference tests, commits the verified source changes and deploys GitHub Pages. A failed export or browser test prevents deployment.
 
-## Model behavior
+Edit `web/config.json` to change prompts and their German/English bin mapping, then commit and rerun the workflow. The changed vocabulary invalidates the model cache. Text prompts and bin names are not evidence that the model can reliably distinguish every material.
 
-`auto` tries YOLOv8s-World v2 with fixed vocabulary from `web/config.json`. If conversion or numerical checks fail, it tries conventional YOLOv8s. This fallback shows object predictions only and is clearly marked in the UI; it never assigns a bin. Select `world` to require YOLO-World with no fallback, or `standin` to test ordinary YOLO explicitly. Conversion logs are retained as workflow artifacts.
+Images remain on the device. The camera uses `facingMode: { exact: 'environment' }` with no front-camera fallback. Low-confidence or ambiguous results show no sorting advice.
 
-Models must have float32 NHWC inputs, built-in TFLite operations, embedded class metadata and numerical agreement with PyTorch on three synthetic inputs. A Chromium test checks rear-only camera constraints, language persistence, narrow layout and actual TFLite inference through the pinned browser runtime. These checks do not establish classification accuracy or iPhone speed. The device/backend and time are shown under Test details.
-
-No front camera picker or permissive camera fallback exists. If the rear camera cannot be opened, select a photo. Backgrounding the page stops its camera. Three consistent live detections stabilize the result; no detection or conflicting disposal destinations clear the advice. Unknown is never mapped to residual waste.
-
-The prompts are experimental. Packaging versus non-packaging, deposit status, reusable bottles and municipal biowaste rules remain limitations. Advice is conditional. Check https://www.oesterreich.gv.at/de/themen/bauen_und_wohnen/abfall and https://www.recycling-pfand.at/ . The app does not determine deposit status from bottle shape.
-
-## Editing
-
-Edit files in `web/` or `scripts/` through GitHub's web editor, then run this workflow again. Existing source files are not overwritten by the embedded bootstrap. The cache key includes the export script, requirements, vocabulary and selected mode. To retry an unchanged failed World export after an `auto` fallback, choose `world` or clear the model cache.
-
-Application code: AGPL-3.0-or-later (https://www.gnu.org/licenses/agpl-3.0.html). Ultralytics, YOLO-World, CLIP and other dependencies retain their upstream licenses and notices. The runtime versions follow the AVAWLeoben YOLO Classroom LiteRT demo; the DSL repository is not changed. No user photo is included.
+The browser checks include real TFLite invocation with WebGPU available and with WebGPU disabled, plus rear-camera constraints, language persistence and narrow-screen layout. They do not establish recognition accuracy or physical iPhone performance. Test those on the target phones.
