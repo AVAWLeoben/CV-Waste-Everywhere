@@ -24,15 +24,15 @@ def classroom_input(source, destination):
     old = graph.tensors[old_index]
     assert old.type == schema.TensorType.FLOAT32
     shape = list(old.shape)
-    if shape == [1, 3, 320, 320]:
+    if shape == [1, 3, 640, 640]:
         Path(destination).write_bytes(data)
         return Path(destination)
-    assert shape == [1, 320, 320, 3], f'Unexpected input: {shape}'
+    assert shape == [1, 640, 640, 3], f'Unexpected input: {shape}'
 
     input_tensor = schema.TensorT()
     input_tensor.name = b'classroom_images_nchw'
     input_tensor.type = schema.TensorType.FLOAT32
-    input_tensor.shape = [1, 3, 320, 320]
+    input_tensor.shape = [1, 3, 640, 640]
     input_tensor.hasRank = True
     new_index = len(graph.tensors)
     graph.tensors.append(input_tensor)

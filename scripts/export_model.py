@@ -32,18 +32,18 @@ checkpoint='yolov8s-worldv2.pt'
 model=YOLOWorld(checkpoint)
 model.set_classes(prompts)
 reference=copy.deepcopy(model.model).eval().float()
-export=Path(model.export(format='tflite',imgsz=320,batch=1,half=False,int8=False,nms=False,device='cpu',opset=17))
+export=Path(model.export(format='tflite',imgsz=640,batch=1,half=False,int8=False,nms=False,device='cpu',opset=17))
 file=export if export.is_file() else next(export.glob('*_float32.tflite'))
 file=classroom_input(file,file.with_name('world_classroom.tflite'))
 i=Interpreter(model_path=str(file),num_threads=2);i.allocate_tensors()
 inputs=i.get_input_details();outputs=i.get_output_details()
 assert len(inputs)==len(outputs)==1
-assert list(inputs[0]['shape'])==[1,3,320,320]
+assert list(inputs[0]['shape'])==[1,3,640,640]
 assert inputs[0]['dtype']==outputs[0]['dtype']==np.float32
 ops=sorted({x['op_name'] for x in i._get_ops_details()})
 assert not any(x.startswith('Flex') or x=='CUSTOM' for x in ops),'Custom/Flex operations cannot be shipped'
 rng=np.random.default_rng(42);checks=[]
-xs=[np.zeros((1,320,320,3),np.float32),rng.random((1,320,320,3),dtype=np.float32),np.tile(np.linspace(0,1,320,dtype=np.float32)[None,None,:,None],(1,320,1,3))]
+xs=[np.zeros((1,640,640,3),np.float32),rng.random((1,640,640,3),dtype=np.float32),np.tile(np.linspace(0,1,640,dtype=np.float32)[None,None,:,None],(1,640,1,3))]
 for x in xs:
     with torch.inference_mode():
         y=reference(torch.from_numpy(x.transpose(0,3,1,2).copy()))
@@ -52,16 +52,17 @@ for x in xs:
     if actual.shape!=expected.shape and actual.transpose(0,2,1).shape==expected.shape:actual=actual.transpose(0,2,1)
     assert actual.shape==expected.shape and np.isfinite(actual).all()
     # Ultralytics TFLite exports normalize decoded coordinates to input size.
-    actual=actual.copy();actual[:,:4,:]*=320
+    actual=actual.copy();actual[:,:4,:]*=640
     np.testing.assert_allclose(actual[:,:4,:],expected[:,:4,:],rtol=.003,atol=.25)
     np.testing.assert_allclose(actual[:,4:,:],expected[:,4:,:],rtol=.005,atol=.002)
     checks.append({'maxBoxErrorPixels':float(abs(actual[:,:4,:]-expected[:,:4,:]).max()),'maxScoreError':float(abs(actual[:,4:,:]-expected[:,4:,:]).max())})
 with zipfile.ZipFile(file) as z: metadata=json.loads(z.read('metadata.json'))
 assert metadata['task']=='detect'
+assert metadata['imgsz']==[640,640]
 names=prompts
 assert [metadata['names'][str(k)] for k in range(len(names))]==names
-shutil.copyfile(file,out/'waste_320.tflite')
-manifest={'file':'waste_320.tflite','mode':'world','pipeline':'classroom','model':checkpoint,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
+shutil.copyfile(file,out/'waste_640.tflite')
+manifest={'file':'waste_640.tflite','mode':'world','pipeline':'classroom','inputSize':640,'model':checkpoint,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
 (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
 (out/'validation.json').write_text(json.dumps({'checks':checks,'ops':ops,'input':inputs[0]['shape'].tolist(),'output':outputs[0]['shape'].tolist(),'mobileTested':False},indent=2))
 print(json.dumps(manifest,indent=2))
