@@ -388,6 +388,46 @@ jobs:
            old="if(count>=3||mode==='photo')item=b;"
            assert old in s;s=s.replace(old,"item=b;")
           p.write_text(s)
+      - name: Stamp visible app version and refresh asset URLs
+        shell: python
+        run: |
+          from pathlib import Path
+          import os, json, re
+          from datetime import datetime, timezone
+          version='0.4.1'
+          run=os.environ.get('GITHUB_RUN_NUMBER','local')
+          attempt=os.environ.get('GITHUB_RUN_ATTEMPT','1')
+          commit=os.environ.get('GITHUB_SHA','local')[:7]
+          build=f'{run}.{attempt}-{commit}'
+          stamp=f'{version}-{build}'
+          info={'version':version,'build':build,'builtAt':datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+          p=Path('web/index.html');s=p.read_text()
+          s=re.sub(r'<p id="versionDisclaimer"[^>]*>.*?</p>', '', s, flags=re.S)
+          s=s.replace('</main>', '<p id="versionDisclaimer" aria-label="App version"></p></main>')
+          s=re.sub(r'href="style\.css(?:\?[^"]*)?"',f'href="style.css?v={stamp}"',s)
+          s=re.sub(r'src="app\.js(?:\?[^"]*)?"',f'src="app.js?v={stamp}"',s)
+          p.write_text(s)
+          p=Path('web/app.js');s=p.read_text()
+          s=re.sub(r'// Build identification start\n.*?// Build identification end\n','',s,flags=re.S)
+          addition="// Build identification start\nconst APP_BUILD="+json.dumps(info)+";\n"+r"""function renderVersion(){
+           const size=manifest?.inputSize;
+           const modelInfo=size ? `YOLO-World v2 · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
+           $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n${APP_BUILD.builtAt}\n`+(lang==='de'?'Experimenteller Prototyp – Material und Sortierempfehlung können falsch sein.':'Experimental prototype – material and sorting advice may be incorrect.');
+           diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
+          }
+          // Build identification end
+          """
+          s=s.replace('function render(){',addition+'function render(){',1)
+          s=s.replace('function render(){\n renderVersion();','function render(){')
+          s=s.replace('function render(){','function render(){\n renderVersion();',1)
+          p.write_text(s)
+          p=Path('web/style.css');s=p.read_text().split('/* Build identification */')[0]
+          s+="""/* Build identification */
+          #versionDisclaimer{font-size:10px;line-height:1.35;color:#526558;text-align:center;white-space:pre-line;overflow-wrap:anywhere;margin:12px 0 0}
+          body.scanning main{grid-template-rows:42px minmax(100px,1fr) auto 48px auto auto}
+          body.scanning #versionDisclaimer{display:block;grid-column:1/-1;grid-row:6;margin:0;font-size:9px}
+          """
+          p.write_text(s)
       - name: Check source code
         run: |
           node --check web/app.js
