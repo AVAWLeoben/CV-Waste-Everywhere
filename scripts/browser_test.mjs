@@ -37,7 +37,7 @@ try{
   live.on('console',m=>{if(m.type()==='error')console.error('Browser:',m.text());});
   if(forceCPU)await live.addInitScript(()=>Object.defineProperty(navigator,'gpu',{value:undefined}));
   await live.goto('http://127.0.0.1:8000/site/');
-  const png=await live.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=320;const g=c.getContext('2d');g.fillStyle='#cedac2';g.fillRect(0,0,320,320);g.fillStyle='#345d47';g.fillRect(110,40,100,240);return c.toDataURL().split(',')[1];});
+  const png=await live.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=640;const g=c.getContext('2d');g.fillStyle='#cedac2';g.fillRect(0,0,640,640);g.fillStyle='#345d47';g.fillRect(220,80,200,480);return c.toDataURL().split(',')[1];});
   await live.locator('#image').setInputFiles({name:'synthetic-test.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
   let d,success=false;
   for(let n=0;n<240;n++){
@@ -48,6 +48,7 @@ try{
   }
   assert(success,'Model did not complete browser inference within four minutes');
   assert.equal(d.mode,'world');
+  assert.equal(d.inputSize,640);
   assert.equal(d.model,'yolov8s-worldv2.pt');
   assert(Array.isArray(d.detections));
   for(const b of d.detections)assert([b.conf,b.x1,b.y1,b.x2,b.y2].every(Number.isFinite));

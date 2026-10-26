@@ -1,6 +1,6 @@
 # Waste Everywhere — YOLO-World v2
 
-This app uses `yolov8s-worldv2.pt` with the fixed waste prompts in `web/config.json`, exported to float32 TFLite. The prompts are embedded during export; the browser does not run a text encoder. The prototype does not require a newly annotated training dataset, but sorting accuracy still needs evaluation.
+This app uses `yolov8s-worldv2.pt` with the fixed waste prompts in `web/config.json`, exported to 640 x 640 float32 TFLite. The prompts are embedded during export; the browser does not run a text encoder. The prototype does not require a newly annotated training dataset, but sorting accuracy still needs evaluation.
 
 The app reuses the YOLO Classroom demo's `YOLO.load(File)` and `model.predict(image)` interface. The existing classroom repository is read-only and is not deployed or modified by this workflow.
 
