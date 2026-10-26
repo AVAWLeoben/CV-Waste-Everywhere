@@ -276,6 +276,29 @@ jobs:
            }
            assert(ready,'Test server did not start');
            browser=await chromium.launch({args:['--enable-unsafe-webgpu','--use-angle=swiftshader']});
+           // Exercise the real page styles with long predictions, without downloading a model.
+           for(const viewport of [{width:375,height:548},{width:390,height:664},{width:430,height:740}]){
+            const layoutContext=await browser.newContext({viewport});
+            const layoutPage=await layoutContext.newPage();
+            await layoutPage.goto('http://127.0.0.1:8000/site/');
+            for(const language of ['de','en'])for(const active of [false,true]){
+             await layoutPage.evaluate(({language,active})=>{
+              document.documentElement.lang=language;document.body.classList.toggle('scanning',active);
+              document.querySelector('#start').hidden=active;document.querySelector('#stop').hidden=!active;
+              document.querySelector('#name').textContent=language==='de'?'Kunststoff-Getränkeverpackung':'Plastic beverage packaging';
+              document.querySelector('#destination').textContent=language==='de'?'Gelbe Tonne / Gelber Sack':'Yellow bin / yellow bag';
+              document.querySelector('#advice').textContent=language==='de'?'Nur restentleerte Verpackungen. Bei Getränkeflaschen und -dosen zuerst Pfand prüfen.':'Emptied packaging only. Check beverage bottles and cans for a deposit first.';
+              document.querySelector('#status').textContent=language==='de'?'Erkennung wird vorbereitet. Der erste Download kann etwas dauern …':'Preparing recognition. The first download may take a while …';
+             },{language,active});
+             const bounds=await layoutPage.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight,rects:['camera','name','advice','versionDisclaimer','status',document.querySelector('#start').hidden?'stop':'start'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {id,top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:r.height};})}));
+             assert(bounds.scrollWidth<=bounds.width && bounds.scrollHeight<=bounds.height+1,`Page overflow: ${JSON.stringify(bounds)}`);
+             for(const r of bounds.rects)assert(r.top>=0&&r.bottom<=bounds.height+1&&r.left>=0&&r.right<=bounds.width,`Offscreen ${r.id}`);
+             assert(bounds.rects[0].height>=100,'Camera became too small');
+            }
+            await layoutPage.locator('#infoButton').click();assert(await layoutPage.locator('#infoDialog').isVisible());
+            await layoutPage.locator('#closeInfo').click();assert(!(await layoutPage.locator('#infoDialog').isVisible()));
+            await layoutContext.close();
+           }
            const context=await browser.newContext({viewport:{width:390,height:844}});
            const page=await context.newPage();
            await page.addInitScript(()=>{
@@ -394,7 +417,7 @@ jobs:
           from pathlib import Path
           import os, json, re
           from datetime import datetime, timezone
-          version='0.4.1'
+          version='0.5.0'
           run=os.environ.get('GITHUB_RUN_NUMBER','local')
           attempt=os.environ.get('GITHUB_RUN_ATTEMPT','1')
           commit=os.environ.get('GITHUB_SHA','local')[:7]
@@ -427,6 +450,28 @@ jobs:
           body.scanning main{grid-template-rows:42px minmax(100px,1fr) auto 48px auto auto}
           body.scanning #versionDisclaimer{display:block;grid-column:1/-1;grid-row:6;margin:0;font-size:9px}
           """
+          p.write_text(s)
+      - name: Install single-screen iPhone layout
+        shell: python
+        run: |
+          CSS='/* SPDX-License-Identifier: AGPL-3.0-or-later */\n:root{font-family:system-ui,-apple-system,sans-serif;color:#173f32;background:#f6f7f1}*{box-sizing:border-box}body{margin:0}main{height:100vh;height:100svh;height:100dvh;max-width:700px;margin:auto;padding:max(6px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));display:grid;grid-template-columns:1fr 1fr;grid-template-rows:44px minmax(0,1fr) auto 44px auto auto;gap:6px}header{grid-area:1/1/2/-1;display:flex;align-items:center;gap:8px;min-width:0}header b{font-size:11px;letter-spacing:.4px;margin-right:auto}button{font:inherit;min-height:44px;cursor:pointer;border:0;border-radius:10px}#language,#infoButton{background:#e1e9db;color:#173f32;padding:0 10px;min-width:44px}#eyebrow,#heading,#intro,#notice{display:none}#camera{grid-area:2/1/3/-1;position:relative;min-height:0;overflow:hidden;border-radius:16px;background:#e2e9dc;display:grid;place-items:center}video,img,canvas{position:absolute;inset:0;width:100%;height:100%}video{object-fit:cover;background:#15281e}img{object-fit:contain;background:#15281e}canvas{pointer-events:none}#placeholder{font-size:64px;color:#8da48e}#privacy{position:absolute;bottom:8px;max-width:95%;background:#f6faefe8;border-radius:24px;padding:5px 9px;font-size:10px;text-align:center}.result{grid-area:3/1/4/-1;padding:9px 12px;border:1px solid #dce5d6;background:white;border-radius:14px;min-width:0}.result .eyebrow{display:none}.result h2{font-size:20px;line-height:1.15;margin:0;overflow-wrap:anywhere}.result h3{font-size:15px;line-height:1.2;margin:5px 0 0;color:#39734e}#advice{font-size:12px;line-height:1.3;margin:5px 0 0;color:#526558}#destination:empty,#advice:empty{display:none}.primary{grid-area:4/1/5/2;width:100%;padding:6px;background:#173f32;color:white;font-size:14px;font-weight:650}button:disabled{opacity:.5}.choose{grid-area:4/2/5/3;display:flex;align-items:center;justify-content:center;min-height:44px;font-size:14px;border-radius:10px;background:#e1e9db;text-align:center;cursor:pointer}.choose input{position:absolute;width:1px;height:1px;clip-path:inset(50%)}#status{grid-area:5/1/6/-1;margin:0;text-align:center;font-size:11px;line-height:1.2;color:#526558;overflow-wrap:anywhere}#status.error{color:#a43b2a}#versionDisclaimer{grid-area:6/1/7/-1;margin:0;font-size:9px;line-height:1.25;color:#526558;text-align:center;white-space:pre-line;overflow-wrap:anywhere}dialog{max-width:min(94vw,600px);max-height:85dvh;overflow:auto;border:1px solid #dce5d6;border-radius:16px;padding:16px;color:#173f32;background:#f6f7f1}dialog::backdrop{background:#15281e99}dialog footer{font-size:14px;line-height:1.5}dialog button{padding:8px 16px}a{color:inherit}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}[hidden]{display:none!important}:focus-visible{outline:3px solid #8abd79;outline-offset:2px}\n@media(max-height:560px){main{gap:4px}.result{padding:7px 10px}.result h2{font-size:18px}#advice{font-size:11px}#privacy{font-size:9px;padding:4px 8px}}\n/* Preserve access with text zoom or very short landscape windows. */\n@media(max-height:420px){main{height:auto;min-height:100dvh;grid-template-rows:44px minmax(140px,1fr) auto 44px auto auto}}\n'
+          from pathlib import Path
+          import re
+          p=Path('web/style.css');p.write_text(CSS)
+          p=Path('web/index.html');s=p.read_text()
+          if 'id="infoDialog"' not in s:
+           footer=re.search(r'<footer>.*?</footer>',s,re.S).group()
+           s=s.replace(footer,'').replace('</main>', '</main><dialog id="infoDialog"><button id="closeInfo" type="button">Schließen / Close</button>'+footer+'</dialog>')
+           s=s.replace('<button id="language"','<button id="infoButton" type="button" aria-label="Information">Info</button><button id="language"')
+          p.write_text(s)
+          p=Path('web/app.js');s=p.read_text()
+          s=s.replace("$('versionDisclaimer').textContent=", "$('versionDisclaimer').title=APP_BUILD.builtAt;\n $('versionDisclaimer').textContent=",1) if "$('versionDisclaimer').title=" not in s else s
+          s=s.replace('${modelInfo}\\n${APP_BUILD.builtAt}\\n','${modelInfo}\\n')
+          s=s.replace('Experimenteller Prototyp – Material und Sortierempfehlung können falsch sein.','Prototyp · Material und Sortierhinweise können falsch sein.').replace('Experimental prototype – material and sorting advice may be incorrect.','Prototype · Material and sorting advice may be incorrect.')
+          s=s.replace("chooseText:'Oder ein Foto auswählen'", "chooseText:'Foto wählen'").replace("chooseText:'Or choose a photo'", "chooseText:'Choose photo'")
+          s=s.replace('Kunststoff oder Glas? Bitte am Gegenstand prüfen. Aus diesem Bild lässt sich das Material nicht sicher bestimmen.','Kunststoff oder Glas? Bitte am Gegenstand prüfen.').replace('Plastic or glass? Please check the item. This image does not establish its material reliably.','Plastic or glass? Please check the item.')
+          if '// Information dialog' not in s:
+           s+="\n// Information dialog\n$('infoButton').onclick=()=>$('infoDialog').showModal();\n$('closeInfo').onclick=()=>$('infoDialog').close();\n"
           p.write_text(s)
       - name: Check source code
         run: |
