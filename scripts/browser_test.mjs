@@ -14,6 +14,29 @@ try{
  }
  assert(ready,'Test server did not start');
  browser=await chromium.launch({args:['--enable-unsafe-webgpu','--use-angle=swiftshader']});
+ // Exercise the real page styles with long predictions, without downloading a model.
+ for(const viewport of [{width:375,height:548},{width:390,height:664},{width:430,height:740}]){
+  const layoutContext=await browser.newContext({viewport});
+  const layoutPage=await layoutContext.newPage();
+  await layoutPage.goto('http://127.0.0.1:8000/site/');
+  for(const language of ['de','en'])for(const active of [false,true]){
+   await layoutPage.evaluate(({language,active})=>{
+    document.documentElement.lang=language;document.body.classList.toggle('scanning',active);
+    document.querySelector('#start').hidden=active;document.querySelector('#stop').hidden=!active;
+    document.querySelector('#name').textContent=language==='de'?'Kunststoff-Getränkeverpackung':'Plastic beverage packaging';
+    document.querySelector('#destination').textContent=language==='de'?'Gelbe Tonne / Gelber Sack':'Yellow bin / yellow bag';
+    document.querySelector('#advice').textContent=language==='de'?'Nur restentleerte Verpackungen. Bei Getränkeflaschen und -dosen zuerst Pfand prüfen.':'Emptied packaging only. Check beverage bottles and cans for a deposit first.';
+    document.querySelector('#status').textContent=language==='de'?'Erkennung wird vorbereitet. Der erste Download kann etwas dauern …':'Preparing recognition. The first download may take a while …';
+   },{language,active});
+   const bounds=await layoutPage.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight,rects:['camera','name','advice','versionDisclaimer','status',document.querySelector('#start').hidden?'stop':'start'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {id,top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:r.height};})}));
+   assert(bounds.scrollWidth<=bounds.width && bounds.scrollHeight<=bounds.height+1,`Page overflow: ${JSON.stringify(bounds)}`);
+   for(const r of bounds.rects)assert(r.top>=0&&r.bottom<=bounds.height+1&&r.left>=0&&r.right<=bounds.width,`Offscreen ${r.id}`);
+   assert(bounds.rects[0].height>=100,'Camera became too small');
+  }
+  await layoutPage.locator('#infoButton').click();assert(await layoutPage.locator('#infoDialog').isVisible());
+  await layoutPage.locator('#closeInfo').click();assert(!(await layoutPage.locator('#infoDialog').isVisible()));
+  await layoutContext.close();
+ }
  const context=await browser.newContext({viewport:{width:390,height:844}});
  const page=await context.newPage();
  await page.addInitScript(()=>{

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 const $=id=>document.getElementById(id);
 const words={
- de:{eyebrow:'WENIGER RÄTSELN. BESSER TRENNEN.',heading:'Zeig uns, was du entsorgen möchtest.',intro:'Ein Gegenstand. Deine Rückkamera. Eine erste Orientierung.',privacy:'● Bleibt auf deinem Gerät',start:'Rückkamera starten',stop:'Kamera stoppen',chooseText:'Oder ein Foto auswählen',resultTitle:'DEINE SORTIERHILFE',ready:'Bereit, wenn du es bist.',search:'Gegenstand ins Bild halten',steady:'Kurz ruhig halten …',uncertain:'Noch nicht eindeutig',loading:'Erkennung wird vorbereitet. Der erste Download kann etwas dauern …',active:'Erkennung läuft lokal auf deinem Gerät.',stopped:'Kamera gestoppt.',cameraError:'Rückkamera nicht verfügbar. Kamerazugriff in Safari erlauben oder ein Foto auswählen.',modelError:'Erkennung konnte nicht geladen werden. Bitte erneut versuchen.',imageError:'Foto konnte nicht geöffnet werden.',inferError:'Erkennung unterbrochen. Bitte neu starten.',generic:'Objekt erkannt. Dieses Testmodell bestimmt noch keine passende Sammlung.',world:'Experimentelle Erkennung. Empfehlung und Ausnahmen bitte prüfen.',standin:'Testmodus: allgemeines YOLO-Modell. Objekterkennung ohne Entsorgungsempfehlung.',footer:'Prototyp für Österreich. Bilder werden nicht hochgeladen oder gesammelt. Unsichere Ergebnisse sind keine Entsorgungsempfehlung.',rules:'Offizielle Informationen zur Mülltrennung ↗'},
- en:{eyebrow:'LESS GUESSING. BETTER SORTING.',heading:'Show us what you want to throw away.',intro:'One item. Your rear camera. A little guidance.',privacy:'● Stays on your device',start:'Start rear camera',stop:'Stop camera',chooseText:'Or choose a photo',resultTitle:'YOUR SORTING GUIDE',ready:'Ready when you are.',search:'Hold one item in view',steady:'Hold still for a moment …',uncertain:'Not clear yet',loading:'Preparing recognition. The first download may take a while …',active:'Recognition is running locally on your device.',stopped:'Camera stopped.',cameraError:'Rear camera unavailable. Allow camera access in Safari or choose a photo.',modelError:'Could not load recognition. Please try again.',imageError:'Could not open this photo.',inferError:'Recognition interrupted. Please restart.',generic:'Object detected. This test model does not determine its collection stream yet.',world:'Experimental recognition. Check the suggestion and exceptions.',standin:'Test mode: general YOLO model. Object recognition without disposal advice.',footer:'Prototype for Austria. Images are not uploaded or collected. Uncertain results are not disposal advice.',rules:'Official waste-sorting information ↗'}
+ de:{eyebrow:'WENIGER RÄTSELN. BESSER TRENNEN.',heading:'Zeig uns, was du entsorgen möchtest.',intro:'Ein Gegenstand. Deine Rückkamera. Eine erste Orientierung.',privacy:'● Bleibt auf deinem Gerät',start:'Rückkamera starten',stop:'Kamera stoppen',chooseText:'Foto wählen',resultTitle:'DEINE SORTIERHILFE',ready:'Bereit, wenn du es bist.',search:'Gegenstand ins Bild halten',steady:'Kurz ruhig halten …',uncertain:'Noch nicht eindeutig',loading:'Erkennung wird vorbereitet. Der erste Download kann etwas dauern …',active:'Erkennung läuft lokal auf deinem Gerät.',stopped:'Kamera gestoppt.',cameraError:'Rückkamera nicht verfügbar. Kamerazugriff in Safari erlauben oder ein Foto auswählen.',modelError:'Erkennung konnte nicht geladen werden. Bitte erneut versuchen.',imageError:'Foto konnte nicht geöffnet werden.',inferError:'Erkennung unterbrochen. Bitte neu starten.',generic:'Objekt erkannt. Dieses Testmodell bestimmt noch keine passende Sammlung.',world:'Experimentelle Erkennung. Empfehlung und Ausnahmen bitte prüfen.',standin:'Testmodus: allgemeines YOLO-Modell. Objekterkennung ohne Entsorgungsempfehlung.',footer:'Prototyp für Österreich. Bilder werden nicht hochgeladen oder gesammelt. Unsichere Ergebnisse sind keine Entsorgungsempfehlung.',rules:'Offizielle Informationen zur Mülltrennung ↗'},
+ en:{eyebrow:'LESS GUESSING. BETTER SORTING.',heading:'Show us what you want to throw away.',intro:'One item. Your rear camera. A little guidance.',privacy:'● Stays on your device',start:'Start rear camera',stop:'Stop camera',chooseText:'Choose photo',resultTitle:'YOUR SORTING GUIDE',ready:'Ready when you are.',search:'Hold one item in view',steady:'Hold still for a moment …',uncertain:'Not clear yet',loading:'Preparing recognition. The first download may take a while …',active:'Recognition is running locally on your device.',stopped:'Camera stopped.',cameraError:'Rear camera unavailable. Allow camera access in Safari or choose a photo.',modelError:'Could not load recognition. Please try again.',imageError:'Could not open this photo.',inferError:'Recognition interrupted. Please restart.',generic:'Object detected. This test model does not determine its collection stream yet.',world:'Experimental recognition. Check the suggestion and exceptions.',standin:'Test mode: general YOLO model. Object recognition without disposal advice.',footer:'Prototype for Austria. Images are not uploaded or collected. Uncertain results are not disposal advice.',rules:'Official waste-sorting information ↗'}
 };
 const bins={
  yellow:{de:['Gelbe Tonne / Gelber Sack','Nur restentleerte Verpackungen. Bei Getränkeflaschen und -dosen zuerst Pfand prüfen.'],en:['Yellow bin / yellow bag','Emptied packaging only. Check beverage bottles and cans for a deposit first.']},
@@ -19,11 +19,12 @@ let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0
 let state='ready',status='',error='',item=null;const diagnostics={};
 // Mobile scanning behaviour
 // Build identification start
-const APP_BUILD={"version": "0.4.1", "build": "8.1-c1ff179", "builtAt": "2026-10-26 19:00 UTC"};
+const APP_BUILD={"version": "0.5.0", "build": "9.1-4cfd1a1", "builtAt": "2026-10-26 19:19 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `YOLO-World v2 · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
- $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n${APP_BUILD.builtAt}\n`+(lang==='de'?'Experimenteller Prototyp – Material und Sortierempfehlung können falsch sein.':'Experimental prototype – material and sorting advice may be incorrect.');
+ $('versionDisclaimer').title=APP_BUILD.builtAt;
+ $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n`+(lang==='de'?'Prototyp · Material und Sortierhinweise können falsch sein.':'Prototype · Material and sorting advice may be incorrect.');
  diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
 }
 // Build identification end
@@ -40,7 +41,7 @@ function render(){
   if(/bottle/i.test(prompt)){
    $('name').textContent=lang==='de'?'Flasche – Material unklar':'Bottle – material uncertain';
    $('destination').textContent='';
-   $('advice').textContent=lang==='de'?'Kunststoff oder Glas? Bitte am Gegenstand prüfen. Aus diesem Bild lässt sich das Material nicht sicher bestimmen.':'Plastic or glass? Please check the item. This image does not establish its material reliably.';
+   $('advice').textContent=lang==='de'?'Kunststoff oder Glas? Bitte am Gegenstand prüfen.':'Plastic or glass? Please check the item.';
   }else if(mode==='camera' && count<2){
    $('name').textContent=(lang==='de'?'Möglicherweise: ':'Possible: ')+$('name').textContent;
    $('destination').textContent='';
@@ -129,3 +130,6 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)sto
 window.addEventListener('pagehide',()=>{stop();if(photoURL)URL.revokeObjectURL(photoURL);});
 render();
 requestAnimationFrame(tick);
+// Information dialog
+$('infoButton').onclick=()=>$('infoDialog').showModal();
+$('closeInfo').onclick=()=>$('infoDialog').close();
