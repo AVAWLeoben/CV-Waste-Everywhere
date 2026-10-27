@@ -1,4 +1,4 @@
-name: Waste app - YOLO-World v2
+name: Waste app - YOLOv8n
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply the World-compatible classroom loader here only
+      - name: Apply the trained-model-compatible classroom loader here only
         shell: python
         run: |
           from pathlib import Path
@@ -50,7 +50,7 @@ jobs:
            loading=(async()=>{
             setStatus('loading');
             [config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);
-            if(manifest.pipeline!=='classroom'||manifest.mode!=='world'||manifest.model!=='yolov8s-worldv2.pt')throw Error('Expected the YOLO-World v2 classroom-compatible export');
+            if(manifest.pipeline!=='classroom'||manifest.mode!=='trained'||manifest.model!=='waste_yolov8n.pt')throw Error('Expected the YOLOv8n classroom-compatible export');
             if(JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
             diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;diagnostics.inputSize=manifest.inputSize;render();
             const {YOLO}=await import('@ultralytics/yolo');
@@ -99,7 +99,7 @@ jobs:
           """Give a float32 NHWC TFLite graph the classroom runtime's NCHW input.
           
           Adds one standard TRANSPOSE at the graph entrance. Weights, predictions,
-          normalized output coordinates and the fixed YOLO-World vocabulary stay intact.
+          normalized output coordinates and the fixed YOLOv8n vocabulary stay intact.
           """
           import io
           from pathlib import Path
@@ -180,10 +180,10 @@ jobs:
           import argparse, json, os, subprocess, sys
           from pathlib import Path
           ROOT=Path(__file__).resolve().parents[1]
-          p=argparse.ArgumentParser();p.add_argument('--candidate',choices=['world']);p.add_argument('--choice',choices=['world'],default='world');a=p.parse_args()
+          p=argparse.ArgumentParser();p.add_argument('--candidate',choices=['trained']);p.add_argument('--choice',choices=['trained'],default='trained');a=p.parse_args()
           (ROOT/'model-work').mkdir(exist_ok=True);out=ROOT/'build/models';out.mkdir(parents=True,exist_ok=True)
           if not a.candidate:
-              for mode in ['world']:
+              for mode in ['trained']:
                   log=ROOT/'model-work'/f'{mode}.log'
                   print(f'Attempting {mode}',flush=True)
                   with log.open('w') as f:
@@ -200,18 +200,22 @@ jobs:
           import copy,hashlib,shutil,zipfile
           import numpy as np
           import torch
-          from ultralytics import YOLOWorld
+          from ultralytics import YOLO
           from classroom_input import classroom_input
           from ai_edge_litert.interpreter import Interpreter
           os.chdir(ROOT/'model-work');torch.set_num_threads(2)
           config=json.loads((ROOT/'web/config.json').read_text());prompts=[c['prompt'] for c in config['classes']]
-          checkpoint='yolov8s-worldv2.pt'
-          model=YOLOWorld(checkpoint)
-          model.set_classes(prompts)
+          checkpoint='waste_yolov8n.pt'
+          source=ROOT/'models'/checkpoint
+          assert source.is_file(), f'Missing trained model: {source}'
+          source_hash=hashlib.sha256(source.read_bytes()).hexdigest()
+          model=YOLO(str(source))
+          assert model.task=='detect', 'Expected a detection checkpoint'
+          assert [model.names[k] for k in range(len(model.names))]==prompts, 'Checkpoint class order differs from config'
           reference=copy.deepcopy(model.model).eval().float()
           export=Path(model.export(format='tflite',imgsz=640,batch=1,half=False,int8=False,nms=False,device='cpu',opset=17))
           file=export if export.is_file() else next(export.glob('*_float32.tflite'))
-          file=classroom_input(file,file.with_name('world_classroom.tflite'))
+          file=classroom_input(file,file.with_name('trained_classroom.tflite'))
           i=Interpreter(model_path=str(file),num_threads=2);i.allocate_tensors()
           inputs=i.get_input_details();outputs=i.get_output_details()
           assert len(inputs)==len(outputs)==1
@@ -239,12 +243,12 @@ jobs:
           names=prompts
           assert [metadata['names'][str(k)] for k in range(len(names))]==names
           shutil.copyfile(file,out/'waste_640.tflite')
-          manifest={'file':'waste_640.tflite','mode':'world','pipeline':'classroom','inputSize':640,'model':checkpoint,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
+          manifest={'file':'waste_640.tflite','mode':'trained','pipeline':'classroom','inputSize':640,'model':checkpoint,'checkpointSha256':source_hash,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
           (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
           (out/'validation.json').write_text(json.dumps({'checks':checks,'ops':ops,'input':inputs[0]['shape'].tolist(),'output':outputs[0]['shape'].tolist(),'mobileTested':False},indent=2))
           print(json.dumps(manifest,indent=2))
           ''')
-          Path('scripts/requirements.txt').write_text(r'''ultralytics==8.3.221
+          Path('scripts/requirements.txt').write_text(r'''ultralytics==8.4.16
           numpy==1.26.4
           onnx==1.17.0
           onnxruntime==1.20.1
@@ -332,9 +336,9 @@ jobs:
              await new Promise(r=>setTimeout(r,1000));
             }
             assert(success,'Model did not complete browser inference within four minutes');
-            assert.equal(d.mode,'world');
+            assert.equal(d.mode,'trained');
             assert.equal(d.inputSize,640);
-            assert.equal(d.model,'yolov8s-worldv2.pt');
+            assert.equal(d.model,'waste_yolov8n.pt');
             assert(Array.isArray(d.detections));
             for(const b of d.detections)assert([b.conf,b.x1,b.y1,b.x2,b.y2].every(Number.isFinite));
             if(forceCPU)assert.equal(d.backend,'cpu');
@@ -343,26 +347,16 @@ jobs:
            }
            const path='site/models/validation.json',report=JSON.parse(readFileSync(path));
            report.browserTested=true;report.browser=reports;writeFileSync(path,JSON.stringify(report,null,2));
-           console.log('PASS: rear camera, language, layout, YOLO-World v2 inference and CPU path.',reports);
+           console.log('PASS: rear camera, language, layout, YOLOv8n inference and CPU path.',reports);
           }finally{await browser?.close();server.kill();}
           ''')
-          Path('README-WASTE.md').write_text(r'''# Waste Everywhere — YOLO-World v2
-          
-          This app uses `yolov8s-worldv2.pt` with the fixed waste prompts in `web/config.json`, exported to 640 x 640 float32 TFLite. The prompts are embedded during export; the browser does not run a text encoder. The prototype does not require a newly annotated training dataset, but sorting accuracy still needs evaluation.
-          
-          The app reuses the YOLO Classroom demo's `YOLO.load(File)` and `model.predict(image)` interface. The existing classroom repository is read-only and is not deployed or modified by this workflow.
-          
-          The export adds one built-in TRANSPOSE to accept the classroom runtime's NCHW input. Model weights, class order and normalized output coordinates remain unchanged. The numerical tests compare the final TFLite model with the PyTorch model before deployment.
-          
-          JavaScript and WebAssembly both use LiteRT 2.5.3. If WebGPU invocation fails, the app reloads the same World model on CPU and retries once. There is no fallback to a conventional YOLO model.
-          
-          Run **Actions → Waste app - YOLO-World v2 → Run workflow** on `main`. The workflow updates the app sources, exports and validates World, runs browser inference tests, commits the verified source changes and deploys GitHub Pages. A failed export or browser test prevents deployment.
-          
-          Edit `web/config.json` to change prompts and their German/English bin mapping, then commit and rerun the workflow. The changed vocabulary invalidates the model cache. Text prompts and bin names are not evidence that the model can reliably distinguish every material.
-          
-          Images remain on the device. The camera uses `facingMode: { exact: 'environment' }` with no front-camera fallback. Low-confidence or ambiguous results show no sorting advice.
-          
-          The browser checks include real TFLite invocation with WebGPU available and with WebGPU disabled, plus rear-camera constraints, language persistence and narrow-screen layout. They do not establish recognition accuracy or physical iPhone performance. Test those on the target phones.
+          Path('README-WASTE.md').write_text(r'''# Waste Everywhere — trained YOLOv8n
+          Commit your trained detection checkpoint to models/waste_yolov8n.pt and run this workflow on main.
+          The six trained class IDs are Papier, Leichtverpackung, Buntglas, Weißglas, Biotonne, Restmüll.
+          Class names are validated against the checkpoint before float32 TFLite export at 640 pixels.
+          Numerical equivalence and real browser inference checks must pass before Pages deployment.
+          The checkpoint hash participates in the export cache key. Camera images remain on device.
+          Browser checks establish execution, not sorting accuracy or physical phone performance.
           ''')
       - name: Make camera and prediction fit one screen
         shell: python
@@ -391,7 +385,7 @@ jobs:
           if '// Mobile scanning behaviour' not in s:
            s=s.replace('function render(){', "// Mobile scanning behaviour\nfunction render(){\n document.body.classList.toggle('scanning',!!source);")
            marker=" $('notice').textContent="
-           addition=""" if(item && manifest.mode==='world'){
+           addition=""" if(item && manifest.mode==='trained'){
             const prompt=config.classes[item.cls]?.prompt||'';
             if(/bottle/i.test(prompt)){
              $('name').textContent=lang==='de'?'Flasche – Material unklar':'Bottle – material uncertain';
@@ -434,7 +428,7 @@ jobs:
           s=re.sub(r'// Build identification start\n.*?// Build identification end\n','',s,flags=re.S)
           addition="// Build identification start\nconst APP_BUILD="+json.dumps(info)+";\n"+r"""function renderVersion(){
            const size=manifest?.inputSize;
-           const modelInfo=size ? `YOLO-World v2 · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
+           const modelInfo=size ? `YOLOv8n · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
            $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n${APP_BUILD.builtAt}\n`+(lang==='de'?'Experimenteller Prototyp – Material und Sortierempfehlung können falsch sein.':'Experimental prototype – material and sorting advice may be incorrect.');
            diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
           }
@@ -473,6 +467,18 @@ jobs:
           if '// Information dialog' not in s:
            s+="\n// Information dialog\n$('infoButton').onclick=()=>$('infoDialog').showModal();\n$('closeInfo').onclick=()=>$('infoDialog').close();\n"
           p.write_text(s)
+      - name: Configure trained classes and advice
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+          assert Path('models/waste_yolov8n.pt').is_file(), 'Commit models/waste_yolov8n.pt first'
+          Path('web/config.json').write_text(json.dumps({'confidence': 0.25, 'classes': [{'prompt': 'Papier', 'de': 'Papier', 'en': 'Paper', 'bin': 'paper'}, {'prompt': 'Leichtverpackung', 'de': 'Leichtverpackung', 'en': 'Lightweight packaging', 'bin': 'yellow'}, {'prompt': 'Buntglas', 'de': 'Buntglas', 'en': 'Coloured glass', 'bin': 'colored'}, {'prompt': 'Weißglas', 'de': 'Weißglas', 'en': 'Clear glass', 'bin': 'clear'}, {'prompt': 'Biotonne', 'de': 'Biotonne', 'en': 'Organic waste', 'bin': 'bio'}, {'prompt': 'Restmüll', 'de': 'Restmüll', 'en': 'Residual waste', 'bin': 'residual'}]},ensure_ascii=False,indent=2),encoding='utf-8')
+          p=Path('web/app.js');s=p.read_text()
+          s=s.replace("'world'", "'trained'").replace('world:', 'trained:').replace('YOLO-World v2', 'YOLOv8n')
+          if 'residual:{' not in s:
+              s=s.replace('const bins={', "const bins={\n residual:{de:['Restmüll','Nur nicht verwertbarer Haushaltsabfall. Keine Batterien, Elektrogeräte oder Problemstoffe.'],en:['Residual waste','Non-recyclable household waste only. No batteries, electronics or hazardous waste.']},")
+          p.write_text(s)
       - name: Check source code
         run: |
           node --check web/app.js
@@ -482,16 +488,15 @@ jobs:
         id: model-cache
         with:
           path: build/models
-          key: world2-classroom-640-v2-${{ hashFiles('scripts/export_model.py', 'scripts/classroom_input.py', 'scripts/requirements.txt', 'web/config.json') }}
+          key: trained-classroom-640-v1-${{ hashFiles('models/waste_yolov8n.pt', 'scripts/export_model.py', 'scripts/classroom_input.py', 'scripts/requirements.txt', 'web/config.json') }}
       - name: Install export tools
         if: steps.model-cache.outputs.cache-hit != 'true'
         run: |
           python -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -r scripts/requirements.txt
-          python -m pip install 'git+https://github.com/ultralytics/CLIP.git@7ffa84b3bfa40c42ecc1c77147a855e69cb2dd40'
-      - name: Export and numerically verify YOLO-World v2 only
+      - name: Export and numerically verify trained YOLOv8n
         if: steps.model-cache.outputs.cache-hit != 'true'
-        run: python scripts/export_model.py --choice world
+        run: python scripts/export_model.py --choice trained
       - name: Package site
         run: |
           mkdir -p site/models
@@ -502,22 +507,22 @@ jobs:
         run: |
           npm install --no-save --no-package-lock playwright@1.56.1
           npx playwright install --with-deps chromium
-      - name: Require World inference on both browser paths
+      - name: Require trained-model inference on both browser paths
         timeout-minutes: 10
         run: node scripts/browser_test.mjs
       - name: Save verified changes in CV-Waste-Everywhere
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add web/app.js web/index.html web/style.css scripts/browser_test.mjs scripts/export_model.py scripts/classroom_input.py scripts/requirements.txt README-WASTE.md
+          git add web/config.json web/app.js web/index.html web/style.css scripts/browser_test.mjs scripts/export_model.py scripts/classroom_input.py scripts/requirements.txt README-WASTE.md
           if ! git diff --cached --quiet; then
-            git commit -m 'Use classroom inference API with YOLO-World v2 TFLite'
+            git commit -m 'Use classroom inference API with YOLOv8n TFLite'
             git push origin HEAD:main
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: world-validation
+          name: trained-validation
           path: |
             model-work/*.log
             site/models/*.json

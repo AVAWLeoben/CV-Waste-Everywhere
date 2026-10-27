@@ -1,0 +1,10 @@
+path: C:\Users\GKoinig\Desktop\CV-Waste-Everywhere\combined_split_lists
+train: train.txt
+val: val.txt
+names:
+  0: Papier
+  1: Leichtverpackung
+  2: Buntglas
+  3: Weißglas
+  4: Biotonne
+  5: Restmüll
