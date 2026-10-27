@@ -1,12 +1,17 @@
-name: Waste app - YOLOv8n
+name: Waste app - trained YOLO
 
 on:
   workflow_dispatch:
+    inputs:
+      model_path:
+        description: 'Checkpoint path, e.g. models/yolo26n-waste.pt (blank selects the only .pt file)'
+        required: false
+        type: string
   push:
     branches:
       - main
     paths:
-      - 'models/waste_yolov8n.pt'
+      - 'models/**.pt'
       - '.github/workflows/bootstrap.yml'
 
 permissions:
@@ -32,6 +37,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - name: Select trained checkpoint
+        env:
+          REQUESTED_MODEL: ${{ inputs.model_path }}
+        shell: python
+        run: |
+          from pathlib import Path
+          import os, hashlib
+          root=Path.cwd().resolve();directory=(root/'models').resolve()
+          requested=os.environ.get('REQUESTED_MODEL','').strip()
+          candidates=sorted(directory.rglob('*.pt'))
+          if requested:
+              source=(root/requested).resolve()
+          else:
+              assert len(candidates)==1, 'Keep exactly one .pt in models/, or run manually and specify model_path.'
+              source=candidates[0].resolve()
+          assert source.is_relative_to(directory) and source.suffix=='.pt' and source.is_file(), 'Model must be a .pt file inside models/'
+          relative=source.relative_to(root).as_posix()
+          assert '\n' not in relative and '\r' not in relative
+          digest=hashlib.sha256(source.read_bytes()).hexdigest()
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write(f'MODEL_PATH={relative}\nMODEL_SHA256={digest}\n')
+          print(f'Selected {relative} ({digest[:12]})')
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -56,7 +83,7 @@ jobs:
            loading=(async()=>{
             setStatus('loading');
             [config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);
-            if(manifest.pipeline!=='classroom'||manifest.mode!=='trained'||manifest.model!=='waste_yolov8n.pt')throw Error('Expected the YOLOv8n classroom-compatible export');
+            if(manifest.pipeline!=='classroom'||manifest.mode!=='trained'||typeof manifest.model!=='string'||!manifest.model.endsWith('.pt'))throw Error('Expected the trained YOLO classroom-compatible export');
             if(JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
             diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;diagnostics.inputSize=manifest.inputSize;render();
             const {YOLO}=await import('@ultralytics/yolo');
@@ -211,13 +238,16 @@ jobs:
           from ai_edge_litert.interpreter import Interpreter
           os.chdir(ROOT/'model-work');torch.set_num_threads(2)
           config=json.loads((ROOT/'web/config.json').read_text());prompts=[c['prompt'] for c in config['classes']]
-          checkpoint='waste_yolov8n.pt'
-          source=ROOT/'models'/checkpoint
+          source=ROOT/os.environ['MODEL_PATH']
+          checkpoint=source.name
           assert source.is_file(), f'Missing trained model: {source}'
           source_hash=hashlib.sha256(source.read_bytes()).hexdigest()
           model=YOLO(str(source))
           assert model.task=='detect', 'Expected a detection checkpoint'
           assert [model.names[k] for k in range(len(model.names))]==prompts, 'Checkpoint class order differs from config'
+          architecture=Path(str(model.model.yaml.get('yaml_file',''))).stem or 'Custom YOLO detector'
+          scale=str(model.model.yaml.get('scale',''))
+          if scale and not architecture.endswith(scale): architecture+=' ('+scale+')'
           reference=copy.deepcopy(model.model).eval().float()
           export=Path(model.export(format='tflite',imgsz=640,batch=1,half=False,int8=False,nms=False,device='cpu',opset=17))
           file=export if export.is_file() else next(export.glob('*_float32.tflite'))
@@ -249,7 +279,7 @@ jobs:
           names=prompts
           assert [metadata['names'][str(k)] for k in range(len(names))]==names
           shutil.copyfile(file,out/'waste_640.tflite')
-          manifest={'file':'waste_640.tflite','mode':'trained','pipeline':'classroom','inputSize':640,'model':checkpoint,'checkpointSha256':source_hash,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
+          manifest={'file':'waste_640.tflite','mode':'trained','pipeline':'classroom','inputSize':640,'model':checkpoint,'architecture':architecture,'checkpointSha256':source_hash,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
           (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
           (out/'validation.json').write_text(json.dumps({'checks':checks,'ops':ops,'input':inputs[0]['shape'].tolist(),'output':outputs[0]['shape'].tolist(),'mobileTested':False},indent=2))
           print(json.dumps(manifest,indent=2))
@@ -305,6 +335,17 @@ jobs:
              for(const r of bounds.rects)assert(r.top>=0&&r.bottom<=bounds.height+1&&r.left>=0&&r.right<=bounds.width,`Offscreen ${r.id}`);
              assert(bounds.rects[0].height>=100,'Camera became too small');
             }
+            const stable=await layoutPage.evaluate(()=>{
+             const ids=['camera','name','destination','advice','start','stop','status','versionDisclaimer'];
+             const geometry=()=>ids.map(id=>{const r=document.getElementById(id).getBoundingClientRect();return [r.x,r.y,r.width,r.height];});
+             const results=[];
+             for(const text of ['', 'Papier', 'Möglicherweise: Leichtverpackung', 'Possible: lightweight packaging with a long description']){
+              for(const id of ['name','destination','advice','status'])document.getElementById(id).textContent=text;
+              results.push(geometry());
+             }
+             return results;
+            });
+            for(const geometry of stable.slice(1))assert.deepEqual(geometry,stable[0],'Prediction text moved the mobile layout');
             await layoutPage.locator('#infoButton').click();assert(await layoutPage.locator('#infoDialog').isVisible());
             await layoutPage.locator('#closeInfo').click();assert(!(await layoutPage.locator('#infoDialog').isVisible()));
             await layoutContext.close();
@@ -344,7 +385,7 @@ jobs:
             assert(success,'Model did not complete browser inference within four minutes');
             assert.equal(d.mode,'trained');
             assert.equal(d.inputSize,640);
-            assert.equal(d.model,'waste_yolov8n.pt');
+            assert.equal(d.model,JSON.parse(readFileSync('site/models/manifest.json')).model);
             assert(Array.isArray(d.detections));
             for(const b of d.detections)assert([b.conf,b.x1,b.y1,b.x2,b.y2].every(Number.isFinite));
             if(forceCPU)assert.equal(d.backend,'cpu');
@@ -356,8 +397,8 @@ jobs:
            console.log('PASS: rear camera, language, layout, YOLOv8n inference and CPU path.',reports);
           }finally{await browser?.close();server.kill();}
           ''')
-          Path('README-WASTE.md').write_text(r'''# Waste Everywhere — trained YOLOv8n
-          Commit your trained detection checkpoint to models/waste_yolov8n.pt and run this workflow on main.
+          Path('README-WASTE.md').write_text(r'''# Waste Everywhere — trained YOLO
+          Keep one trained .pt checkpoint in models/, or select model_path when running manually. Architecture changes must pass export and browser checks.
           The six trained class IDs are Papier, Leichtverpackung, Buntglas, Weißglas, Biotonne, Restmüll.
           Class names are validated against the checkpoint before float32 TFLite export at 640 pixels.
           Numerical equivalence and real browser inference checks must pass before Pages deployment.
@@ -434,7 +475,7 @@ jobs:
           s=re.sub(r'// Build identification start\n.*?// Build identification end\n','',s,flags=re.S)
           addition="// Build identification start\nconst APP_BUILD="+json.dumps(info)+";\n"+r"""function renderVersion(){
            const size=manifest?.inputSize;
-           const modelInfo=size ? `YOLOv8n · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
+           const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
            $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n${APP_BUILD.builtAt}\n`+(lang==='de'?'Experimenteller Prototyp – Material und Sortierempfehlung können falsch sein.':'Experimental prototype – material and sorting advice may be incorrect.');
            diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
           }
@@ -478,7 +519,8 @@ jobs:
         run: |
           from pathlib import Path
           import json
-          assert Path('models/waste_yolov8n.pt').is_file(), 'Commit models/waste_yolov8n.pt first'
+          import os
+          assert Path(os.environ['MODEL_PATH']).is_file(), 'Selected checkpoint is missing'
           Path('web/config.json').write_text(json.dumps({'confidence': 0.25, 'classes': [{'prompt': 'Papier', 'de': 'Papier', 'en': 'Paper', 'bin': 'paper'}, {'prompt': 'Leichtverpackung', 'de': 'Leichtverpackung', 'en': 'Lightweight packaging', 'bin': 'yellow'}, {'prompt': 'Buntglas', 'de': 'Buntglas', 'en': 'Coloured glass', 'bin': 'colored'}, {'prompt': 'Weißglas', 'de': 'Weißglas', 'en': 'Clear glass', 'bin': 'clear'}, {'prompt': 'Biotonne', 'de': 'Biotonne', 'en': 'Organic waste', 'bin': 'bio'}, {'prompt': 'Restmüll', 'de': 'Restmüll', 'en': 'Residual waste', 'bin': 'residual'}]},ensure_ascii=False,indent=2),encoding='utf-8')
           p=Path('web/app.js');s=p.read_text()
           s=s.replace("'world'", "'trained'").replace('world:', 'trained:').replace('YOLO-World v2', 'YOLOv8n')
@@ -500,6 +542,23 @@ jobs:
           assert n==1, f'Expected one bounding-box stroke colour, found {n}'
           s=s[:start]+draw+s[end:]
           p.write_text(s)
+      - name: Stabilize mobile prediction layout
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('web/style.css')
+          s=p.read_text().split('/* Stable prediction panel:')[0]
+          p.write_text(s+'/* Stable prediction panel: changing text must never resize the camera. */\nmain{grid-template-rows:44px minmax(100px,1fr) 184px 44px 28px 34px}\n.result{height:184px;min-height:0;overflow:hidden;display:grid;grid-template-rows:48px 36px minmax(0,1fr);gap:4px;padding:10px 12px}\n.result #name{font-size:20px;line-height:24px;font-weight:700;letter-spacing:-.02em;margin:0;min-width:0;min-height:0;overflow:auto;overflow-wrap:anywhere}\n.result #destination{display:block;height:36px;font-size:14px;line-height:18px;margin:0;min-height:0;overflow:auto}\n.result #advice{display:block;font-size:12px;line-height:16px;margin:0;min-height:0;overflow:auto;overscroll-behavior:contain}\n#destination:empty,#advice:empty{display:block;visibility:hidden}\n#status{height:28px;min-height:0;overflow:auto;line-height:14px}\n#versionDisclaimer{height:34px;min-height:0;overflow:auto}\n.result,#camera{transition:none}\n@media(max-height:560px){.result{padding:10px 12px}.result #name{font-size:20px}.result #advice{font-size:12px}}\n/* Short landscape windows scroll instead of crushing the camera or clipping text. */\n@media(max-height:480px){main{height:auto;min-height:100dvh;grid-template-rows:44px 140px 184px 44px 28px 34px}}\n')
+          p=Path('web/index.html');s=p.read_text()
+          # Make overflowing advice keyboard-scrollable as well as touch-scrollable.
+          for element_id in ('name','destination','advice','status','versionDisclaimer'):
+              import re
+              pattern=r'<([a-zA-Z][a-zA-Z0-9]*)\b([^>]*\bid="'+element_id+r'"[^>]*)>'
+              def focusable(m):
+                  attrs=m.group(2)
+                  return m.group(0) if 'tabindex=' in attrs else '<'+m.group(1)+attrs+' tabindex="0">'
+              s=re.sub(pattern,focusable,s)
+          p.write_text(s)
       - name: Check source code
         run: |
           node --check web/app.js
@@ -509,13 +568,13 @@ jobs:
         id: model-cache
         with:
           path: build/models
-          key: trained-classroom-640-v1-${{ hashFiles('models/waste_yolov8n.pt', 'scripts/export_model.py', 'scripts/classroom_input.py', 'scripts/requirements.txt', 'web/config.json') }}
+          key: trained-classroom-640-v2-${{ env.MODEL_PATH }}-${{ env.MODEL_SHA256 }}-${{ hashFiles( 'scripts/export_model.py', 'scripts/classroom_input.py', 'scripts/requirements.txt', 'web/config.json') }}
       - name: Install export tools
         if: steps.model-cache.outputs.cache-hit != 'true'
         run: |
           python -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -r scripts/requirements.txt
-      - name: Export and numerically verify trained YOLOv8n
+      - name: Export and numerically verify trained YOLO
         if: steps.model-cache.outputs.cache-hit != 'true'
         run: python scripts/export_model.py --choice trained
       - name: Package site
