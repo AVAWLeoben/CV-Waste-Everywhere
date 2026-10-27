@@ -20,10 +20,10 @@ let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0
 let state='ready',status='',error='',item=null;const diagnostics={};
 // Mobile scanning behaviour
 // Build identification start
-const APP_BUILD={"version": "0.5.0", "build": "14.1-976d7ce", "builtAt": "2026-10-27 13:10 UTC"};
+const APP_BUILD={"version": "0.5.0", "build": "18.1-79041d6", "builtAt": "2026-10-27 15:48 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
- const modelInfo=size ? `YOLOv8n · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
+ const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
  $('versionDisclaimer').title=APP_BUILD.builtAt;
  $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n`+(lang==='de'?'Prototyp · Material und Sortierhinweise können falsch sein.':'Prototype · Material and sorting advice may be incorrect.');
  diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
@@ -63,9 +63,9 @@ async function ensureModel(){
  loading=(async()=>{
   setStatus('loading');
   [config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);
-  if(manifest.pipeline!=='classroom'||manifest.mode!=='trained'||manifest.model!=='waste_yolov8n.pt')throw Error('Expected the YOLOv8n classroom-compatible export');
+  if(manifest.pipeline!=='classroom'||manifest.mode!=='trained'||typeof manifest.model!=='string'||!manifest.model.endsWith('.pt'))throw Error('Expected the trained YOLO classroom-compatible export');
   if(JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
-  diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;diagnostics.inputSize=manifest.inputSize;render();
+  diagnostics.end2end=manifest.end2end;diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;diagnostics.inputSize=manifest.inputSize;render();
   const {YOLO}=await import('@ultralytics/yolo');
   const response=await fetch(new URL('./models/'+manifest.file,location.href));
   if(!response.ok)throw Error(`Model HTTP ${response.status}`);
