@@ -20,7 +20,7 @@ let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0
 let state='ready',status='',error='',item=null;const diagnostics={};
 // Mobile scanning behaviour
 // Build identification start
-const APP_BUILD={"version": "0.5.0", "build": "10.1-eb727b5", "builtAt": "2026-10-27 10:39 UTC"};
+const APP_BUILD={"version": "0.5.0", "build": "11.1-df29259", "builtAt": "2026-10-27 12:21 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `YOLOv8n · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
