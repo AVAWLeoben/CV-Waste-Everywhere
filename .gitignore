@@ -6,5 +6,5 @@
 
 
 # Ignore the Data folder
-Data/
+# Data/
 combined_split_lists/
