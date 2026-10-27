@@ -2,6 +2,11 @@ name: Waste app - YOLOv8n
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'models/waste_yolov8n.pt'
 
 permissions:
   contents: read
