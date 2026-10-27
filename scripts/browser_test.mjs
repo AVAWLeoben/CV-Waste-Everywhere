@@ -70,9 +70,9 @@ try{
    await new Promise(r=>setTimeout(r,1000));
   }
   assert(success,'Model did not complete browser inference within four minutes');
-  assert.equal(d.mode,'world');
+  assert.equal(d.mode,'trained');
   assert.equal(d.inputSize,640);
-  assert.equal(d.model,'yolov8s-worldv2.pt');
+  assert.equal(d.model,'waste_yolov8n.pt');
   assert(Array.isArray(d.detections));
   for(const b of d.detections)assert([b.conf,b.x1,b.y1,b.x2,b.y2].every(Number.isFinite));
   if(forceCPU)assert.equal(d.backend,'cpu');
@@ -81,5 +81,5 @@ try{
  }
  const path='site/models/validation.json',report=JSON.parse(readFileSync(path));
  report.browserTested=true;report.browser=reports;writeFileSync(path,JSON.stringify(report,null,2));
- console.log('PASS: rear camera, language, layout, YOLO-World v2 inference and CPU path.',reports);
+ console.log('PASS: rear camera, language, layout, YOLOv8n inference and CPU path.',reports);
 }finally{await browser?.close();server.kill();}
