@@ -1,0 +1,6 @@
+# Ignore JPEG images and text files
+*.jpg
+*.txt
+
+# Ignore the Data folder
+Data/
