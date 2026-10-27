@@ -20,7 +20,7 @@ let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0
 let state='ready',status='',error='',item=null;const diagnostics={};
 // Mobile scanning behaviour
 // Build identification start
-const APP_BUILD={"version": "0.5.0", "build": "18.1-79041d6", "builtAt": "2026-10-27 15:48 UTC"};
+const APP_BUILD={"version": "0.5.0", "build": "19.1-090ee32", "builtAt": "2026-10-27 16:10 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
@@ -115,7 +115,7 @@ $('language').onclick=()=>{lang=lang==='de'?'en':'de';try{localStorage.setItem('
 function iou(a,b){const area=x=>(x.x2-x.x1)*(x.y2-x.y1);const overlap=Math.max(0,Math.min(a.x2,b.x2)-Math.max(a.x1,b.x1))*Math.max(0,Math.min(a.y2,b.y2)-Math.max(a.y1,b.y1));return overlap/(area(a)+area(b)-overlap)||0;}
 function draw(b,w,h){const c=$('overlay'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.round(r.width*d);c.height=Math.round(r.height*d);if(!b)return;const ctx=c.getContext('2d');ctx.scale(d,d);const s=(mode==='camera'?Math.max:Math.min)(r.width/w,r.height/h),dx=(r.width-s*w)/2,dy=(r.height-s*h)/2;ctx.lineWidth=3;ctx.strokeStyle=({paper:'#ff0000',yellow:'#ffff00',colored:'#008000',clear:'#ffffff',bio:'#a52a2a',residual:'#000000'}[config.classes[b.cls]?.bin] || '#808080');ctx.strokeRect(dx+b.x1*s,dy+b.y1*s,(b.x2-b.x1)*s,(b.y2-b.y1)*s);}
 async function tick(now){
- requestAnimationFrame(tick);if(!model||!source||busy||document.hidden||error||now-last<250)return;
+ requestAnimationFrame(tick);if(!model||!source||busy||document.hidden||error)return;
  const src=source,token=epoch,w=src.videoWidth||src.naturalWidth,h=src.videoHeight||src.naturalHeight;if(!w||!h)return;busy=true;last=now;
  try{const t=performance.now(),r=await predictWithFallback(src,{conf:config.confidence,iou:.65});if(token!==epoch)return;status='active';diagnostics.inferenceMs=Math.round(performance.now()-t);diagnostics.completed=(diagnostics.completed||0)+1;
  const rw=r.width||w,rh=r.height||h,boxes=(r.boxes||[]).filter(b=>b.conf>=config.confidence&&[b.x1,b.y1,b.x2,b.y2].every(Number.isFinite)&&b.x2>b.x1&&b.y2>b.y1);
