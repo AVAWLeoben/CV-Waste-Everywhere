@@ -33,6 +33,17 @@ try{
    for(const r of bounds.rects)assert(r.top>=0&&r.bottom<=bounds.height+1&&r.left>=0&&r.right<=bounds.width,`Offscreen ${r.id}`);
    assert(bounds.rects[0].height>=100,'Camera became too small');
   }
+  const stable=await layoutPage.evaluate(()=>{
+   const ids=['camera','name','destination','advice','start','stop','status','versionDisclaimer'];
+   const geometry=()=>ids.map(id=>{const r=document.getElementById(id).getBoundingClientRect();return [r.x,r.y,r.width,r.height];});
+   const results=[];
+   for(const text of ['', 'Papier', 'Möglicherweise: Leichtverpackung', 'Possible: lightweight packaging with a long description']){
+    for(const id of ['name','destination','advice','status'])document.getElementById(id).textContent=text;
+    results.push(geometry());
+   }
+   return results;
+  });
+  for(const geometry of stable.slice(1))assert.deepEqual(geometry,stable[0],'Prediction text moved the mobile layout');
   await layoutPage.locator('#infoButton').click();assert(await layoutPage.locator('#infoDialog').isVisible());
   await layoutPage.locator('#closeInfo').click();assert(!(await layoutPage.locator('#infoDialog').isVisible()));
   await layoutContext.close();
@@ -72,10 +83,10 @@ try{
   assert(success,'Model did not complete browser inference within four minutes');
   assert.equal(d.mode,'trained');
   assert.equal(d.inputSize,640);
-  assert.equal(d.model,'waste_yolov8n.pt');
+  assert.equal(d.model,JSON.parse(readFileSync('site/models/manifest.json')).model);
   assert(Array.isArray(d.detections));
   for(const b of d.detections)assert([b.conf,b.x1,b.y1,b.x2,b.y2].every(Number.isFinite));
-  if(forceCPU)assert.equal(d.backend,'cpu');
+  if(forceCPU || JSON.parse(readFileSync('site/models/manifest.json')).end2end)assert.equal(d.backend,'cpu');
   reports.push({forceCPU,backend:d.backend,fallback:d.fallback,completed:true,detections:d.detections});
   await ctx.close();
  }
