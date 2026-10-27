@@ -479,6 +479,21 @@ jobs:
           if 'residual:{' not in s:
               s=s.replace('const bins={', "const bins={\n residual:{de:['Restmüll','Nur nicht verwertbarer Haushaltsabfall. Keine Batterien, Elektrogeräte oder Problemstoffe.'],en:['Residual waste','Non-recyclable household waste only. No batteries, electronics or hazardous waste.']},")
           p.write_text(s)
+      - name: Match bounding box colours to predictions
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p=Path('web/app.js');s=p.read_text()
+          # Use the predicted class's collection stream, independent of UI language.
+          colour="({paper:'#ff0000',yellow:'#ffff00',colored:'#008000',clear:'#ffffff',bio:'#a52a2a',residual:'#000000'}[config.classes[b.cls]?.bin] || '#808080')"
+          start=s.index('function draw(')
+          end=s.index('async function tick(',start)
+          draw=s[start:end]
+          draw,n=re.subn(r"ctx\.strokeStyle\s*=.*?;",lambda _: 'ctx.strokeStyle='+colour+';',draw)
+          assert n==1, f'Expected one bounding-box stroke colour, found {n}'
+          s=s[:start]+draw+s[end:]
+          p.write_text(s)
       - name: Check source code
         run: |
           node --check web/app.js
