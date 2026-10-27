@@ -85,7 +85,7 @@ jobs:
             [config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);
             if(manifest.pipeline!=='classroom'||manifest.mode!=='trained'||typeof manifest.model!=='string'||!manifest.model.endsWith('.pt'))throw Error('Expected the trained YOLO classroom-compatible export');
             if(JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
-            diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;diagnostics.inputSize=manifest.inputSize;render();
+            diagnostics.end2end=manifest.end2end;diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;diagnostics.inputSize=manifest.inputSize;render();
             const {YOLO}=await import('@ultralytics/yolo');
             const response=await fetch(new URL('./models/'+manifest.file,location.href));
             if(!response.ok)throw Error(`Model HTTP ${response.status}`);
@@ -248,8 +248,9 @@ jobs:
           architecture=Path(str(model.model.yaml.get('yaml_file',''))).stem or 'Custom YOLO detector'
           scale=str(model.model.yaml.get('scale',''))
           if scale and not architecture.endswith(scale): architecture+=' ('+scale+')'
+          end2end=bool(getattr(model.model,'end2end',False))
           reference=copy.deepcopy(model.model).eval().float()
-          export=Path(model.export(format='tflite',imgsz=640,batch=1,half=False,int8=False,nms=False,device='cpu',opset=17))
+          export=Path(model.export(format='tflite',imgsz=640,batch=1,half=False,int8=False,nms=False,end2end=end2end,device='cpu',opset=17))
           file=export if export.is_file() else next(export.glob('*_float32.tflite'))
           file=classroom_input(file,file.with_name('trained_classroom.tflite'))
           i=Interpreter(model_path=str(file),num_threads=2);i.allocate_tensors()
@@ -259,6 +260,36 @@ jobs:
           assert inputs[0]['dtype']==outputs[0]['dtype']==np.float32
           ops=sorted({x['op_name'] for x in i._get_ops_details()})
           assert not any(x.startswith('Flex') or x=='CUSTOM' for x in ops),'Custom/Flex operations cannot be shipped'
+          def compare_outputs(actual,expected,end2end,nc):
+              assert np.isfinite(actual).all() and np.isfinite(expected).all(), 'Non-finite predictions'
+              actual=actual.copy()
+              if end2end:
+                  assert actual.ndim==expected.ndim==3 and actual.shape==expected.shape and actual.shape[0]==1 and actual.shape[2]==6, f'Expected matching [1,N,6], got {actual.shape}, {expected.shape}'
+                  # Only xyxy coordinates are normalized; confidence and class IDs are not.
+                  actual[...,:4]*=640
+                  a,e=actual[0],expected[0]
+                  for rows in (a,e):
+                      assert ((rows[:,4]>=0)&(rows[:,4]<=1)).all(), 'Invalid confidence'
+                      assert ((rows[:,5]>=0)&(rows[:,5]<nc)).all(), 'Invalid class ID'
+                      np.testing.assert_allclose(rows[:,5],np.rint(rows[:,5]),rtol=0,atol=1e-6)
+                  # Top-k ordering can change across runtimes. Match within class using box and score error.
+                  from scipy.optimize import linear_sum_assignment
+                  box_cost=np.max(np.abs(a[:,None,:4]-e[None,:,:4])/(.25+.003*np.abs(e[None,:,:4])),axis=2)
+                  score_cost=np.abs(a[:,None,4]-e[None,:,4])/(.002+.005*np.abs(e[None,:,4]))
+                  cost=box_cost+score_cost+(a[:,None,5]!=e[None,:,5])*1e9
+                  ai,ei=linear_sum_assignment(cost)
+                  a,e=a[ai],e[ei]
+                  np.testing.assert_array_equal(a[:,5],e[:,5])
+                  ab,eb,asc,esc=a[:,:4],e[:,:4],a[:,4],e[:,4]
+              else:
+                  if actual.shape!=expected.shape and actual.ndim==3 and actual.transpose(0,2,1).shape==expected.shape:
+                      actual=actual.transpose(0,2,1)
+                  assert actual.shape==expected.shape and expected.ndim==3 and expected.shape[1]==4+nc, f'Expected raw [1,{4+nc},N], got {actual.shape}, {expected.shape}'
+                  actual[:,:4,:]*=640
+                  ab,eb,asc,esc=actual[:,:4,:],expected[:,:4,:],actual[:,4:,:],expected[:,4:,:]
+              np.testing.assert_allclose(ab,eb,rtol=.003,atol=.25)
+              np.testing.assert_allclose(asc,esc,rtol=.005,atol=.002)
+              return {'maxBoxErrorPixels':float(np.max(np.abs(ab-eb),initial=0)), 'maxScoreError':float(np.max(np.abs(asc-esc),initial=0)), 'end2end':end2end}
           rng=np.random.default_rng(42);checks=[]
           xs=[np.zeros((1,640,640,3),np.float32),rng.random((1,640,640,3),dtype=np.float32),np.tile(np.linspace(0,1,640,dtype=np.float32)[None,None,:,None],(1,640,1,3))]
           for x in xs:
@@ -266,26 +297,22 @@ jobs:
                   y=reference(torch.from_numpy(x.transpose(0,3,1,2).copy()))
                   expected=(y[0] if isinstance(y,tuple) else y).numpy()
               i.set_tensor(inputs[0]['index'],x.transpose(0,3,1,2).copy());i.invoke();actual=i.get_tensor(outputs[0]['index'])
-              if actual.shape!=expected.shape and actual.transpose(0,2,1).shape==expected.shape:actual=actual.transpose(0,2,1)
-              assert actual.shape==expected.shape and np.isfinite(actual).all()
-              # Ultralytics TFLite exports normalize decoded coordinates to input size.
-              actual=actual.copy();actual[:,:4,:]*=640
-              np.testing.assert_allclose(actual[:,:4,:],expected[:,:4,:],rtol=.003,atol=.25)
-              np.testing.assert_allclose(actual[:,4:,:],expected[:,4:,:],rtol=.005,atol=.002)
-              checks.append({'maxBoxErrorPixels':float(abs(actual[:,:4,:]-expected[:,:4,:]).max()),'maxScoreError':float(abs(actual[:,4:,:]-expected[:,4:,:]).max())})
+              checks.append(compare_outputs(actual,expected,end2end,len(prompts)))
           with zipfile.ZipFile(file) as z: metadata=json.loads(z.read('metadata.json'))
           assert metadata['task']=='detect'
+          assert bool(metadata.get('end2end',False))==end2end, 'Export metadata lost end-to-end mode'
           assert metadata['imgsz']==[640,640]
           names=prompts
           assert [metadata['names'][str(k)] for k in range(len(names))]==names
           shutil.copyfile(file,out/'waste_640.tflite')
-          manifest={'file':'waste_640.tflite','mode':'trained','pipeline':'classroom','inputSize':640,'model':checkpoint,'architecture':architecture,'checkpointSha256':source_hash,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
+          manifest={'file':'waste_640.tflite','mode':'trained','pipeline':'classroom','inputSize':640,'model':checkpoint,'architecture':architecture,'end2end':end2end,'outputLayout':'xyxy-score-class' if end2end else 'xywh-class-scores','checkpointSha256':source_hash,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
           (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
           (out/'validation.json').write_text(json.dumps({'checks':checks,'ops':ops,'input':inputs[0]['shape'].tolist(),'output':outputs[0]['shape'].tolist(),'mobileTested':False},indent=2))
           print(json.dumps(manifest,indent=2))
           ''')
           Path('scripts/requirements.txt').write_text(r'''ultralytics==8.4.16
           numpy==1.26.4
+          scipy==1.14.1
           onnx==1.17.0
           onnxruntime==1.20.1
           tensorflow==2.19.0
@@ -388,7 +415,7 @@ jobs:
             assert.equal(d.model,JSON.parse(readFileSync('site/models/manifest.json')).model);
             assert(Array.isArray(d.detections));
             for(const b of d.detections)assert([b.conf,b.x1,b.y1,b.x2,b.y2].every(Number.isFinite));
-            if(forceCPU)assert.equal(d.backend,'cpu');
+            if(forceCPU || JSON.parse(readFileSync('site/models/manifest.json')).end2end)assert.equal(d.backend,'cpu');
             reports.push({forceCPU,backend:d.backend,fallback:d.fallback,completed:true,detections:d.detections});
             await ctx.close();
            }
@@ -475,7 +502,7 @@ jobs:
           s=re.sub(r'// Build identification start\n.*?// Build identification end\n','',s,flags=re.S)
           addition="// Build identification start\nconst APP_BUILD="+json.dumps(info)+";\n"+r"""function renderVersion(){
            const size=manifest?.inputSize;
-           const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
+           const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
            $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n${APP_BUILD.builtAt}\n`+(lang==='de'?'Experimenteller Prototyp – Material und Sortierempfehlung können falsch sein.':'Experimental prototype – material and sorting advice may be incorrect.');
            diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
           }
@@ -568,7 +595,7 @@ jobs:
         id: model-cache
         with:
           path: build/models
-          key: trained-classroom-640-v2-${{ env.MODEL_PATH }}-${{ env.MODEL_SHA256 }}-${{ hashFiles( 'scripts/export_model.py', 'scripts/classroom_input.py', 'scripts/requirements.txt', 'web/config.json') }}
+          key: trained-classroom-640-e2e-v4-${{ env.MODEL_PATH }}-${{ env.MODEL_SHA256 }}-${{ hashFiles( 'scripts/export_model.py', 'scripts/classroom_input.py', 'scripts/requirements.txt', 'web/config.json') }}
       - name: Install export tools
         if: steps.model-cache.outputs.cache-hit != 'true'
         run: |
