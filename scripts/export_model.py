@@ -3,10 +3,10 @@
 import argparse, json, os, subprocess, sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--candidate',choices=['world']);p.add_argument('--choice',choices=['world'],default='world');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--candidate',choices=['trained']);p.add_argument('--choice',choices=['trained'],default='trained');a=p.parse_args()
 (ROOT/'model-work').mkdir(exist_ok=True);out=ROOT/'build/models';out.mkdir(parents=True,exist_ok=True)
 if not a.candidate:
-    for mode in ['world']:
+    for mode in ['trained']:
         log=ROOT/'model-work'/f'{mode}.log'
         print(f'Attempting {mode}',flush=True)
         with log.open('w') as f:
@@ -23,18 +23,22 @@ if not a.candidate:
 import copy,hashlib,shutil,zipfile
 import numpy as np
 import torch
-from ultralytics import YOLOWorld
+from ultralytics import YOLO
 from classroom_input import classroom_input
 from ai_edge_litert.interpreter import Interpreter
 os.chdir(ROOT/'model-work');torch.set_num_threads(2)
 config=json.loads((ROOT/'web/config.json').read_text());prompts=[c['prompt'] for c in config['classes']]
-checkpoint='yolov8s-worldv2.pt'
-model=YOLOWorld(checkpoint)
-model.set_classes(prompts)
+checkpoint='waste_yolov8n.pt'
+source=ROOT/'models'/checkpoint
+assert source.is_file(), f'Missing trained model: {source}'
+source_hash=hashlib.sha256(source.read_bytes()).hexdigest()
+model=YOLO(str(source))
+assert model.task=='detect', 'Expected a detection checkpoint'
+assert [model.names[k] for k in range(len(model.names))]==prompts, 'Checkpoint class order differs from config'
 reference=copy.deepcopy(model.model).eval().float()
 export=Path(model.export(format='tflite',imgsz=640,batch=1,half=False,int8=False,nms=False,device='cpu',opset=17))
 file=export if export.is_file() else next(export.glob('*_float32.tflite'))
-file=classroom_input(file,file.with_name('world_classroom.tflite'))
+file=classroom_input(file,file.with_name('trained_classroom.tflite'))
 i=Interpreter(model_path=str(file),num_threads=2);i.allocate_tensors()
 inputs=i.get_input_details();outputs=i.get_output_details()
 assert len(inputs)==len(outputs)==1
@@ -62,7 +66,7 @@ assert metadata['imgsz']==[640,640]
 names=prompts
 assert [metadata['names'][str(k)] for k in range(len(names))]==names
 shutil.copyfile(file,out/'waste_640.tflite')
-manifest={'file':'waste_640.tflite','mode':'world','pipeline':'classroom','inputSize':640,'model':checkpoint,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
+manifest={'file':'waste_640.tflite','mode':'trained','pipeline':'classroom','inputSize':640,'model':checkpoint,'checkpointSha256':source_hash,'prompts':prompts,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'build':os.environ.get('GITHUB_SHA','local')}
 (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
 (out/'validation.json').write_text(json.dumps({'checks':checks,'ops':ops,'input':inputs[0]['shape'].tolist(),'output':outputs[0]['shape'].tolist(),'mobileTested':False},indent=2))
 print(json.dumps(manifest,indent=2))

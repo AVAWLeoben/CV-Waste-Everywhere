@@ -2,7 +2,7 @@
 """Give a float32 NHWC TFLite graph the classroom runtime's NCHW input.
 
 Adds one standard TRANSPOSE at the graph entrance. Weights, predictions,
-normalized output coordinates and the fixed YOLO-World vocabulary stay intact.
+normalized output coordinates and the fixed YOLOv8n vocabulary stay intact.
 """
 import io
 from pathlib import Path

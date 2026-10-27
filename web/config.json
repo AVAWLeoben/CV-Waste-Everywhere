@@ -1,16 +1,41 @@
-{"confidence":0.25,"classes":[
-{"prompt":"plastic packaging","de":"Kunststoffverpackung","en":"Plastic packaging","bin":"yellow"},
-{"prompt":"metal packaging","de":"Metallverpackung","en":"Metal packaging","bin":"yellow"},
-{"prompt":"beverage carton","de":"Getränkekarton","en":"Beverage carton","bin":"yellow"},
-{"prompt":"plastic beverage bottle","de":"Kunststoff-Getränkeflasche","en":"Plastic beverage bottle","bin":"deposit"},
-{"prompt":"beverage can","de":"Getränkedose","en":"Beverage can","bin":"deposit"},
-{"prompt":"clear glass bottle","de":"Farblose Glasflasche","en":"Clear glass bottle","bin":"clear"},
-{"prompt":"colored glass bottle","de":"Farbige Glasflasche","en":"Coloured glass bottle","bin":"colored"},
-{"prompt":"clear glass jar","de":"Farbloses Verpackungsglas","en":"Clear glass jar","bin":"clear"},
-{"prompt":"colored glass jar","de":"Farbiges Verpackungsglas","en":"Coloured glass jar","bin":"colored"},
-{"prompt":"paper","de":"Papier","en":"Paper","bin":"paper"},
-{"prompt":"cardboard","de":"Karton","en":"Cardboard","bin":"paper"},
-{"prompt":"fruit and vegetable scraps","de":"Obst- und Gemüsereste","en":"Fruit and vegetable scraps","bin":"bio"},
-{"prompt":"plant waste","de":"Pflanzenreste","en":"Plant waste","bin":"bio"},
-{"prompt":"battery","de":"Batterie","en":"Battery","bin":"special"},
-{"prompt":"electronic device","de":"Elektrogerät","en":"Electronic device","bin":"special"}]}
+{
+  "confidence": 0.25,
+  "classes": [
+    {
+      "prompt": "Papier",
+      "de": "Papier",
+      "en": "Paper",
+      "bin": "paper"
+    },
+    {
+      "prompt": "Leichtverpackung",
+      "de": "Leichtverpackung",
+      "en": "Lightweight packaging",
+      "bin": "yellow"
+    },
+    {
+      "prompt": "Buntglas",
+      "de": "Buntglas",
+      "en": "Coloured glass",
+      "bin": "colored"
+    },
+    {
+      "prompt": "Weißglas",
+      "de": "Weißglas",
+      "en": "Clear glass",
+      "bin": "clear"
+    },
+    {
+      "prompt": "Biotonne",
+      "de": "Biotonne",
+      "en": "Organic waste",
+      "bin": "bio"
+    },
+    {
+      "prompt": "Restmüll",
+      "de": "Restmüll",
+      "en": "Residual waste",
+      "bin": "residual"
+    }
+  ]
+}

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 const $=id=>document.getElementById(id);
 const words={
- de:{eyebrow:'WENIGER RÄTSELN. BESSER TRENNEN.',heading:'Zeig uns, was du entsorgen möchtest.',intro:'Ein Gegenstand. Deine Rückkamera. Eine erste Orientierung.',privacy:'● Bleibt auf deinem Gerät',start:'Rückkamera starten',stop:'Kamera stoppen',chooseText:'Foto wählen',resultTitle:'DEINE SORTIERHILFE',ready:'Bereit, wenn du es bist.',search:'Gegenstand ins Bild halten',steady:'Kurz ruhig halten …',uncertain:'Noch nicht eindeutig',loading:'Erkennung wird vorbereitet. Der erste Download kann etwas dauern …',active:'Erkennung läuft lokal auf deinem Gerät.',stopped:'Kamera gestoppt.',cameraError:'Rückkamera nicht verfügbar. Kamerazugriff in Safari erlauben oder ein Foto auswählen.',modelError:'Erkennung konnte nicht geladen werden. Bitte erneut versuchen.',imageError:'Foto konnte nicht geöffnet werden.',inferError:'Erkennung unterbrochen. Bitte neu starten.',generic:'Objekt erkannt. Dieses Testmodell bestimmt noch keine passende Sammlung.',world:'Experimentelle Erkennung. Empfehlung und Ausnahmen bitte prüfen.',standin:'Testmodus: allgemeines YOLO-Modell. Objekterkennung ohne Entsorgungsempfehlung.',footer:'Prototyp für Österreich. Bilder werden nicht hochgeladen oder gesammelt. Unsichere Ergebnisse sind keine Entsorgungsempfehlung.',rules:'Offizielle Informationen zur Mülltrennung ↗'},
- en:{eyebrow:'LESS GUESSING. BETTER SORTING.',heading:'Show us what you want to throw away.',intro:'One item. Your rear camera. A little guidance.',privacy:'● Stays on your device',start:'Start rear camera',stop:'Stop camera',chooseText:'Choose photo',resultTitle:'YOUR SORTING GUIDE',ready:'Ready when you are.',search:'Hold one item in view',steady:'Hold still for a moment …',uncertain:'Not clear yet',loading:'Preparing recognition. The first download may take a while …',active:'Recognition is running locally on your device.',stopped:'Camera stopped.',cameraError:'Rear camera unavailable. Allow camera access in Safari or choose a photo.',modelError:'Could not load recognition. Please try again.',imageError:'Could not open this photo.',inferError:'Recognition interrupted. Please restart.',generic:'Object detected. This test model does not determine its collection stream yet.',world:'Experimental recognition. Check the suggestion and exceptions.',standin:'Test mode: general YOLO model. Object recognition without disposal advice.',footer:'Prototype for Austria. Images are not uploaded or collected. Uncertain results are not disposal advice.',rules:'Official waste-sorting information ↗'}
+ de:{eyebrow:'WENIGER RÄTSELN. BESSER TRENNEN.',heading:'Zeig uns, was du entsorgen möchtest.',intro:'Ein Gegenstand. Deine Rückkamera. Eine erste Orientierung.',privacy:'● Bleibt auf deinem Gerät',start:'Rückkamera starten',stop:'Kamera stoppen',chooseText:'Foto wählen',resultTitle:'DEINE SORTIERHILFE',ready:'Bereit, wenn du es bist.',search:'Gegenstand ins Bild halten',steady:'Kurz ruhig halten …',uncertain:'Noch nicht eindeutig',loading:'Erkennung wird vorbereitet. Der erste Download kann etwas dauern …',active:'Erkennung läuft lokal auf deinem Gerät.',stopped:'Kamera gestoppt.',cameraError:'Rückkamera nicht verfügbar. Kamerazugriff in Safari erlauben oder ein Foto auswählen.',modelError:'Erkennung konnte nicht geladen werden. Bitte erneut versuchen.',imageError:'Foto konnte nicht geöffnet werden.',inferError:'Erkennung unterbrochen. Bitte neu starten.',generic:'Objekt erkannt. Dieses Testmodell bestimmt noch keine passende Sammlung.',trained:'Experimentelle Erkennung. Empfehlung und Ausnahmen bitte prüfen.',standin:'Testmodus: allgemeines YOLO-Modell. Objekterkennung ohne Entsorgungsempfehlung.',footer:'Prototyp für Österreich. Bilder werden nicht hochgeladen oder gesammelt. Unsichere Ergebnisse sind keine Entsorgungsempfehlung.',rules:'Offizielle Informationen zur Mülltrennung ↗'},
+ en:{eyebrow:'LESS GUESSING. BETTER SORTING.',heading:'Show us what you want to throw away.',intro:'One item. Your rear camera. A little guidance.',privacy:'● Stays on your device',start:'Start rear camera',stop:'Stop camera',chooseText:'Choose photo',resultTitle:'YOUR SORTING GUIDE',ready:'Ready when you are.',search:'Hold one item in view',steady:'Hold still for a moment …',uncertain:'Not clear yet',loading:'Preparing recognition. The first download may take a while …',active:'Recognition is running locally on your device.',stopped:'Camera stopped.',cameraError:'Rear camera unavailable. Allow camera access in Safari or choose a photo.',modelError:'Could not load recognition. Please try again.',imageError:'Could not open this photo.',inferError:'Recognition interrupted. Please restart.',generic:'Object detected. This test model does not determine its collection stream yet.',trained:'Experimental recognition. Check the suggestion and exceptions.',standin:'Test mode: general YOLO model. Object recognition without disposal advice.',footer:'Prototype for Austria. Images are not uploaded or collected. Uncertain results are not disposal advice.',rules:'Official waste-sorting information ↗'}
 };
 const bins={
+ residual:{de:['Restmüll','Nur nicht verwertbarer Haushaltsabfall. Keine Batterien, Elektrogeräte oder Problemstoffe.'],en:['Residual waste','Non-recyclable household waste only. No batteries, electronics or hazardous waste.']},
  yellow:{de:['Gelbe Tonne / Gelber Sack','Nur restentleerte Verpackungen. Bei Getränkeflaschen und -dosen zuerst Pfand prüfen.'],en:['Yellow bin / yellow bag','Emptied packaging only. Check beverage bottles and cans for a deposit first.']},
  deposit:{de:['Zuerst Pfand prüfen','Mit österreichischem Pfandzeichen: leer und unzerdrückt zurückgeben. Ohne Zeichen: Verpackungssammlung prüfen.'],en:['Check the deposit first','With the Austrian deposit mark: return empty and uncrushed. Otherwise check packaging collection rules.']},
  clear:{de:['Weißglas – sofern kein Mehrweg','Nur restentleerte, farblose Glasverpackungen. Mehrwegflaschen zurückgeben. Keine Trinkgläser.'],en:['Clear glass – unless returnable','Emptied, colourless glass packaging only. Return reusable bottles. No drinking glasses.']},
@@ -19,10 +20,10 @@ let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0
 let state='ready',status='',error='',item=null;const diagnostics={};
 // Mobile scanning behaviour
 // Build identification start
-const APP_BUILD={"version": "0.5.0", "build": "9.1-4cfd1a1", "builtAt": "2026-10-26 19:19 UTC"};
+const APP_BUILD={"version": "0.5.0", "build": "10.1-eb727b5", "builtAt": "2026-10-27 10:39 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
- const modelInfo=size ? `YOLO-World v2 · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
+ const modelInfo=size ? `YOLOv8n · ${size}×${size}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
  $('versionDisclaimer').title=APP_BUILD.builtAt;
  $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n`+(lang==='de'?'Prototyp · Material und Sortierhinweise können falsch sein.':'Prototype · Material and sorting advice may be incorrect.');
  diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
@@ -35,8 +36,8 @@ function render(){
  for(const id of ['eyebrow','heading','intro','privacy','start','stop','chooseText','resultTitle','footer','rules'])$(id).textContent=words[lang][id];
  $('language').textContent=lang==='de'?'EN':'DE';$('status').textContent=words[lang][status]||'';$('status').classList.toggle('error',!!error);
  $('destination').textContent='';$('advice').textContent='';$('name').textContent=words[lang][state]||'';
- if(item){const c=manifest.mode==='world'?config.classes[item.cls]:null;const name=item.name||String(item.cls);$('name').textContent=c?.[lang]||(lang==='de'?common[name]:null)||name;if(c&&bins[c.bin]){[$('destination').textContent,$('advice').textContent]=bins[c.bin][lang];}else $('advice').textContent=words[lang].generic;}
- if(item && manifest.mode==='world'){
+ if(item){const c=manifest.mode==='trained'?config.classes[item.cls]:null;const name=item.name||String(item.cls);$('name').textContent=c?.[lang]||(lang==='de'?common[name]:null)||name;if(c&&bins[c.bin]){[$('destination').textContent,$('advice').textContent]=bins[c.bin][lang];}else $('advice').textContent=words[lang].generic;}
+ if(item && manifest.mode==='trained'){
   const prompt=config.classes[item.cls]?.prompt||'';
   if(/bottle/i.test(prompt)){
    $('name').textContent=lang==='de'?'Flasche – Material unklar':'Bottle – material uncertain';
@@ -62,7 +63,7 @@ async function ensureModel(){
  loading=(async()=>{
   setStatus('loading');
   [config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);
-  if(manifest.pipeline!=='classroom'||manifest.mode!=='world'||manifest.model!=='yolov8s-worldv2.pt')throw Error('Expected the YOLO-World v2 classroom-compatible export');
+  if(manifest.pipeline!=='classroom'||manifest.mode!=='trained'||manifest.model!=='waste_yolov8n.pt')throw Error('Expected the YOLOv8n classroom-compatible export');
   if(JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
   diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;diagnostics.inputSize=manifest.inputSize;render();
   const {YOLO}=await import('@ultralytics/yolo');
@@ -122,7 +123,7 @@ async function tick(now){
  const rank=b=>(b.x2-b.x1)*(b.y2-b.y1)/(rw*rh)*.65+(1-Math.min(1,Math.hypot((b.x1+b.x2)/2/rw-.5,(b.y1+b.y2)/2/rh-.5)*2))*.25+b.conf*.1;
  boxes.sort((a,b)=>rank(b)-rank(a));const b=boxes[0];item=null;
  if(!b){previous=null;count=0;state='search';draw(null,rw,rh);}
- else if(manifest.mode==='world'&&boxes.some(x=>x!==b&&Math.abs(x.conf-b.conf)<.08&&iou(b,x)>.6&&config.classes[x.cls]?.bin!==config.classes[b.cls]?.bin)){previous=null;count=0;state='uncertain';draw(null,rw,rh);}
+ else if(manifest.mode==='trained'&&boxes.some(x=>x!==b&&Math.abs(x.conf-b.conf)<.08&&iou(b,x)>.6&&config.classes[x.cls]?.bin!==config.classes[b.cls]?.bin)){previous=null;count=0;state='uncertain';draw(null,rw,rh);}
  else{count=previous&&previous.cls===b.cls&&iou(previous,b)>.35?count+1:1;previous=b;state='steady';item=b;draw(b,rw,rh);}render();
  }catch(e){if(token===epoch){reset();setStatus('inferError',e.message);}}finally{busy=false;}
 }
