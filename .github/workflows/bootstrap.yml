@@ -586,6 +586,29 @@ jobs:
                   return m.group(0) if 'tabindex=' in attrs else '<'+m.group(1)+attrs+' tabindex="0">'
               s=re.sub(pattern,focusable,s)
           p.write_text(s)
+      - name: Keep camera fluid and prioritize preview space
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p=Path('web/app.js');s=p.read_text()
+          # Only remove the time gate in tick; retain its busy/visibility/source guards.
+          start=s.index('async function tick(')
+          before=s[:start];tick=s[start:]
+          tick=re.sub(r'\|\|\s*now\s*-\s*last\s*<\s*250', '', tick, count=1)
+          assert 'busy' in tick and 'document.hidden' in tick and 'requestAnimationFrame(tick)' in tick
+          assert not re.search(r'now\s*-\s*last\s*<\s*250',tick)
+          p.write_text(before+tick)
+          p=Path('web/style.css');s=p.read_text().split('/* Camera-first live layout */')[0]
+          p.write_text(s+'/* Camera-first live layout */\nmain{grid-template-rows:44px minmax(100px,1fr) 108px 44px 28px;gap:5px}\n.result{height:108px;grid-template-rows:24px 18px minmax(0,1fr);padding:8px 12px;gap:3px}\n.result #name{font-size:18px;line-height:24px;white-space:nowrap;overflow:auto;overflow-wrap:normal}\n.result #destination{white-space:nowrap;overflow:auto}\n#infoDialog #versionDisclaimer{height:auto;max-height:none;overflow:visible;margin:14px 0 0;font-size:11px;text-align:left}\n#camera{border-radius:12px}\n@media(max-height:480px){main{height:auto;min-height:100dvh;grid-template-rows:44px 140px 108px 44px 28px}}\n')
+          p=Path('web/index.html');s=p.read_text()
+          # Keep architecture/build details accessible without spending preview height.
+          pattern=r'<p\b[^>]*id="versionDisclaimer"[^>]*>.*?</p>'
+          matches=re.findall(pattern,s,re.S)
+          assert len(matches)==1 and 'id="infoDialog"' in s
+          s=re.sub(pattern,'',s,flags=re.S)
+          s=s.replace('</dialog>',matches[0]+'</dialog>',1)
+          p.write_text(s)
       - name: Check source code
         run: |
           node --check web/app.js
