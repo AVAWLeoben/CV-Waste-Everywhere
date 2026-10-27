@@ -1,6 +1,10 @@
 # Ignore JPEG images and text files
 *.jpg
 *.txt
+*.cache
+*.yaml
+
 
 # Ignore the Data folder
 Data/
+combined_split_lists/
