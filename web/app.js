@@ -20,7 +20,7 @@ let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0
 let state='ready',status='',error='',item=null;const diagnostics={};
 // Mobile scanning behaviour
 // Build identification start
-const APP_BUILD={"version": "0.5.0", "build": "19.1-090ee32", "builtAt": "2026-10-27 16:10 UTC"};
+const APP_BUILD={"version": "0.5.0", "build": "20.1-d5117de", "builtAt": "2026-10-29 12:55 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
