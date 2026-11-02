@@ -23,7 +23,7 @@ let state='ready',status='',error='',item=null;const diagnostics={};
 Object.assign(words.de,{classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
 Object.assign(words.en,{classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.6.0", "build": "27.1-2cf9272", "builtAt": "2026-11-02 12:18 UTC"};
+const APP_BUILD={"version": "0.6.1", "build": "28.1-f5cc24e", "builtAt": "2026-11-02 12:30 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
@@ -43,6 +43,7 @@ function render(){
  $('image').disabled=busy;
  $('choose').classList.toggle('disabled',busy);
  $('start').disabled=busy;
+ $('start').hidden=!!source;
  $('camera').setAttribute('aria-busy',String(phase==='processing'));
 
  renderVersion();
@@ -68,7 +69,8 @@ async function json(path){const r=await fetch(path);if(!r.ok)throw Error(`${path
 
 // Classroom model loading: same YOLO.load(File) / predict(image) API as DSL.
 // Keep the JavaScript import map and the WebAssembly assets on 2.5.3.
-let cpuOnly=false;
+// Compatibility build: bypass the device-specific WebGPU result corruption under investigation.
+let cpuOnly=true;
 async function ensureModel(){
  if(model)return model;if(loading)return loading;
  loading=(async()=>{
@@ -133,7 +135,10 @@ $('classify').onclick=async()=>{
  const capture=$('capture');
  try{
   capture.width=w;capture.height=h;capture.getContext('2d').drawImage(src,0,0,w,h);
-  capture.hidden=false;$('video').hidden=true;$('photo').hidden=true;
+  // Keep an uploaded photo on the same display element in every phase.
+  capture.hidden=mode==='photo';$('video').hidden=true;$('photo').hidden=mode!=='photo';
+  diagnostics.captureWidth=w;diagnostics.captureHeight=h;
+  diagnostics.requestedBackend=cpuOnly?'cpu':'webgpu';
   draw(null,w,h);render();
   // Give the captured frame and processing label a chance to paint before invoking WASM.
   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));

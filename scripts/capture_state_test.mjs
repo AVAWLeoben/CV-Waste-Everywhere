@@ -36,3 +36,12 @@ for(const boxes of [
 }
 scope.testBoxes=[];await el('classify').onclick();assert.equal(el('name').textContent,'Kein eindeutiger Gegenstand erkannt');
 console.log('PASS: actual browser wait predicate, highest confidence regardless of area/position/overlap, empty detections');
+// A selected photo remains on the same element throughout the capture cycle.
+el('continue').onclick();
+vm.runInContext("source=$('photo');mode='photo';phase='preview';$('photo').hidden=false;render();",scope);
+assert.equal(el('start').hidden,true);
+await el('classify').onclick();
+assert.equal(el('photo').hidden,false);assert.equal(el('capture').hidden,true);
+el('continue').onclick();assert.equal(el('photo').hidden,false);assert.equal(el('capture').hidden,true);
+assert.equal(vm.runInContext('cpuOnly',scope),true);
+console.log('PASS: photo display continuity and CPU compatibility default');
