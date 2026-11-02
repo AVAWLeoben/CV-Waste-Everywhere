@@ -23,7 +23,7 @@ let state='ready',status='',error='',item=null;const diagnostics={};
 Object.assign(words.de,{modelLoading:'Modell lädt …',retryModel:'Modell erneut laden',classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
 Object.assign(words.en,{modelLoading:'Loading model …',retryModel:'Retry model loading',classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.7.2", "build": "34.1-211ee97", "builtAt": "2026-11-02 13:39 UTC"};
+const APP_BUILD={"version": "0.7.3", "build": "35.1-8d53451", "builtAt": "2026-11-02 13:52 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
@@ -46,6 +46,8 @@ function render(){
  $('start').disabled=busy;
  $('start').hidden=!!source;
  $('camera').setAttribute('aria-busy',String(phase==='processing'));
+ $('backendToggle').disabled=busy||!!loading||!model;
+ $('backendToggle').textContent=(lang==='de'?'Aktiv: ':'Active: ')+(model?.device==='webgpu'?'WebGPU':'CPU')+' · '+(lang==='de'?'Wechsel zu ':'Switch to ')+(model?.device==='webgpu'?'CPU':'WebGPU');
 
  renderVersion();
  document.body.classList.toggle('scanning',!!source);
@@ -146,7 +148,7 @@ async function ensureModel(){
     gpuDevice.lost.then(info=>{gpuFault=`WebGPU device lost: ${info.message||info.reason}`;});
     // Compile CPU reference during preview too; CLASSIFY never waits for its initial download.
     await cpuModel();
-   }else{cpuOnly=true;diagnostics.gpuVerification='not used';diagnostics.fallback='Runtime selected CPU (GPU unavailable, compilation failed, or partial delegation)';}
+   }else{cpuOnly=true;diagnostics.gpuVerification='not used';diagnostics.fallback=diagnostics.backendChoice==='cpu'?'CPU selected manually':'Runtime selected CPU (GPU unavailable, compilation failed, or partial delegation)';}
    model=candidate;
   }catch(e){
    await collectShaderDiagnostics();
@@ -282,7 +284,7 @@ $('classify').onclick=async()=>{
   setStatus('processing');
   const t=performance.now(),r=await predictWithFallback(capture,{conf:config.confidence,iou:.65});
   if(token!==epoch)return;
-  diagnostics.inferenceMs=Math.round(performance.now()-t);diagnostics.completed=(diagnostics.completed||0)+1;
+  diagnostics.inferenceMs=Math.round(performance.now()-t);diagnostics.timingBackend=model.device;diagnostics.completed=(diagnostics.completed||0)+1;
  const rw=r.width||w,rh=r.height||h,boxes=(r.boxes||[]).filter(b=>b.conf>=config.confidence&&[b.x1,b.y1,b.x2,b.y2].every(Number.isFinite)&&b.x2>b.x1&&b.y2>b.y1);
  diagnostics.detections=boxes.map(({cls,name,conf,x1,y1,x2,y2})=>({cls,name,conf,x1,y1,x2,y2}));
  boxes.sort((a,b)=>b.conf-a.conf);const b=boxes[0];item=null;
@@ -329,3 +331,20 @@ render();
 // Information dialog
 $('infoButton').onclick=()=>$('infoDialog').showModal();
 $('closeInfo').onclick=()=>$('infoDialog').close();
+
+// Backend comparison control. Keep the camera and current result intact.
+$('backendToggle').onclick=async()=>{
+ if(busy||loading||!model)return;
+ const token=epoch,target=model.device==='webgpu'?'cpu':'webgpu';
+ busy=true;cpuOnly=target==='cpu';gpuChecks=0;gpuFault='';
+ diagnostics.backendChoice=target;
+ for(const key of ['gpuChecksPassed','gpuError','fallback','gpuPredictionMs','cpuVerificationMs','inferenceMs','timingBackend'])delete diagnostics[key];
+ diagnostics.gpuVerification='pending';
+ const old=model,reference=cpuReference;model=null;cpuReference=null;
+ try{old.free();}catch{}
+ if(reference&&reference!==old)try{reference.free();}catch{}
+ render();
+ try{await ensureModel();if(token===epoch)setStatus(phase==='result'?'finished':'captureReady');}
+ catch(e){if(token===epoch)setStatus('modelError',String(e.message||e));}
+ finally{busy=false;render();}
+};

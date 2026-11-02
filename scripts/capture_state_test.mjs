@@ -118,3 +118,11 @@ for(const code of ['i++;\ncontinuing {','for(var i=0;i<4;i++){',';\nlet x=1;','/
 }
 assert.equal(vm.runInContext('diagnostics.shadersPatched',scope),1);
 console.log('PASS: targeted shader repair preserves loop increments and other statements');
+vm.runInContext("busy=false;loading=null;phase='result';model={device:'webgpu',free(){}};cpuReference=null;ensureModel=async()=>{model={device:cpuOnly?'cpu':'webgpu',free(){}};return model};diagnostics.inferenceMs=500",scope);
+await el('backendToggle').onclick();
+assert.equal(vm.runInContext('model.device',scope),'cpu');
+assert.equal(vm.runInContext('phase',scope),'result');
+assert.equal(vm.runInContext('diagnostics.inferenceMs',scope),undefined);
+await el('backendToggle').onclick();assert.equal(vm.runInContext('model.device',scope),'webgpu');
+vm.runInContext('busy=true',scope);await el('backendToggle').onclick();assert.equal(vm.runInContext('model.device',scope),'webgpu');
+console.log('PASS: backend toggle both directions, preserved result, cleared stale timing, busy guard');
