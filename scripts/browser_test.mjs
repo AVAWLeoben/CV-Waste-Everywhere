@@ -73,6 +73,7 @@ try{
   await live.goto('http://127.0.0.1:8000/site/');
   const png=await live.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=640;const g=c.getContext('2d');g.fillStyle='#cedac2';g.fillRect(0,0,640,640);g.fillStyle='#345d47';g.fillRect(220,80,200,480);return c.toDataURL().split(',')[1];});
   await live.locator('#image').setInputFiles({name:'synthetic-test.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+  await live.locator('#classify').click();
   let d,success=false;
   for(let n=0;n<240;n++){
    d=JSON.parse(await live.locator('#diagnostics').textContent());
@@ -87,6 +88,13 @@ try{
   assert(Array.isArray(d.detections));
   for(const b of d.detections)assert([b.conf,b.x1,b.y1,b.x2,b.y2].every(Number.isFinite));
   if(forceCPU || JSON.parse(readFileSync('site/models/manifest.json')).end2end)assert.equal(d.backend,'cpu');
+  const first=d.completed;
+  await new Promise(r=>setTimeout(r,500));
+  assert.equal(JSON.parse(await live.locator('#diagnostics').textContent()).completed,first,'Unexpected automatic inference');
+  await live.locator('#continue').click();
+  await live.locator('#classify').click();
+  await live.waitForFunction(n=>JSON.parse(document.querySelector('#diagnostics').textContent).completed===n,first+1,{timeout:240000});
+  assert(await live.locator('#continue').isVisible(),'Second capture did not finish');
   reports.push({forceCPU,backend:d.backend,fallback:d.fallback,completed:true,detections:d.detections});
   await ctx.close();
  }
