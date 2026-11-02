@@ -15,6 +15,9 @@ try{
  await page.goto('http://127.0.0.1:8011/web/');await page.locator('#start').click();
  await page.waitForFunction(()=>document.querySelector('#classify').hidden===false);
  assert.equal(await page.evaluate(()=>window.calls||0),0);
+ const initial=await page.locator('#video').boundingBox();
+ const frame=await page.locator('#camera').boundingBox();
+ assert(Math.abs(initial.height-frame.height)<1 || Math.abs(initial.width-frame.width)<1,'Preview does not fill either frame dimension');
  assert(await page.locator('#reticle').isVisible());
  for(let n=1;n<=3;n++){
   await page.locator('#classify').click();
@@ -22,10 +25,13 @@ try{
   assert.equal(await page.evaluate(()=>window.calls),n);
   assert.equal(await page.evaluate(()=>window.inputType),'CANVAS');
   assert(await page.locator('#capture').isVisible());
+  assert.equal(await page.locator('#video').evaluate(e=>e.hidden),false);
   assert.equal(await page.locator('#name').textContent(),'Papier');
   await page.waitForTimeout(200);assert.equal(await page.evaluate(()=>window.calls),n);
   if(n===1)await page.screenshot({path:`capture-${viewport.width}.png`});
   await page.locator('#continue').click();assert(await page.locator('#video').isVisible());
+  const current=await page.locator('#video').boundingBox();
+  assert.deepEqual(current,initial,'Continue changed the displayed video size');
  }
  await page.evaluate(()=>window.failNext=true);await page.locator('#classify').click();
  await page.waitForFunction(()=>document.body.dataset.phase==='error');

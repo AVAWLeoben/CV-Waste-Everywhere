@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 const elements=new Map();
 const ctx2d={clearRect(){},drawImage(){},scale(){},strokeRect(){}};
-function el(id){if(!elements.has(id))elements.set(id,{hidden:false,disabled:false,textContent:'',width:480,height:640,videoWidth:480,videoHeight:640,naturalWidth:480,naturalHeight:640,classList:{toggle(){}},setAttribute(){},getContext:()=>ctx2d,getBoundingClientRect:()=>({width:390,height:420})});return elements.get(id);}
+function el(id){if(!elements.has(id))elements.set(id,{hidden:false,disabled:false,style:{},addEventListener(){},textContent:'',width:480,height:640,videoWidth:480,videoHeight:640,naturalWidth:480,naturalHeight:640,classList:{toggle(){}},setAttribute(){},getContext:()=>ctx2d,getBoundingClientRect:()=>({width:390,height:420})});return elements.get(id);}
 const scope=vm.createContext({document:{getElementById:el,body:{dataset:{},classList:{toggle(){}}},documentElement:{},addEventListener(){},hidden:false},window:{addEventListener(){}},localStorage:{getItem(){},setItem(){}},requestAnimationFrame:fn=>setImmediate(fn),performance,devicePixelRatio:1,URL,console});
 vm.runInContext(readFileSync('web/app.js','utf8'),scope);
 vm.runInContext(`config={confidence:.25,classes:[{de:'Papier',en:'Paper',bin:'paper'}]};manifest={mode:'trained',model:'yolo11s.pt',inputSize:640};source=$('video');mode='camera';phase='preview';globalThis.calls=0;model={device:'cpu',predict:async src=>{globalThis.calls++;if(globalThis.fail){globalThis.fail=false;throw Error('test error')}return {width:480,height:640,boxes:[{cls:0,conf:.9,x1:10,y1:10,x2:200,y2:300}]}}};render();`,scope);
@@ -12,6 +12,7 @@ for(let n=1;n<=3;n++){
  const promise=el('classify').onclick();await el('classify').onclick();await promise;
  assert.equal(scope.calls,n,'Double click must not start a second inference');assert.equal(el('name').textContent,'Papier');
  assert.equal(el('continue').hidden,false);assert.equal(el('capture').hidden,false);
+ assert.equal(el('video').hidden,false,'Live video must stay mounted behind the frozen capture');
  el('continue').onclick();assert.equal(el('capture').hidden,true);assert.equal(el('video').hidden,false);
 }
 scope.fail=true;await el('classify').onclick();assert.equal(el('continue').hidden,false);assert.match(el('diagnostics').textContent,/test error/);
@@ -45,3 +46,8 @@ assert.equal(el('photo').hidden,false);assert.equal(el('capture').hidden,true);
 el('continue').onclick();assert.equal(el('photo').hidden,false);assert.equal(el('capture').hidden,true);
 assert.equal(vm.runInContext('cpuOnly',scope),true);
 console.log('PASS: photo display continuity and CPU compatibility default');
+
+const rect=vm.runInContext('previewRect(1080,1920,373,397)',scope);
+assert.equal(rect.height,397);assert.equal(rect.width,397*1080/1920);
+assert.equal(rect.top,0);assert.equal(rect.left,(373-rect.width)/2);
+console.log('PASS: portrait preview fills available height without cropping or stretching');

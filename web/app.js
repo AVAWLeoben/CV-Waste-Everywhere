@@ -23,7 +23,7 @@ let state='ready',status='',error='',item=null;const diagnostics={};
 Object.assign(words.de,{classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
 Object.assign(words.en,{classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.6.1", "build": "28.1-f5cc24e", "builtAt": "2026-11-02 12:30 UTC"};
+const APP_BUILD={"version": "0.6.2", "build": "29.1-9b9e801", "builtAt": "2026-11-02 12:41 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
@@ -34,6 +34,7 @@ function renderVersion(){
 function render(){
  renderVersion();
  document.body.dataset.phase=phase;
+ fitPreview();
  $('classify').hidden=!source||phase==='result'||phase==='error';
  $('classify').disabled=busy||!source;
  $('classify').textContent=words[lang][phase==='processing'?'processing':'classify'];
@@ -136,7 +137,7 @@ $('classify').onclick=async()=>{
  try{
   capture.width=w;capture.height=h;capture.getContext('2d').drawImage(src,0,0,w,h);
   // Keep an uploaded photo on the same display element in every phase.
-  capture.hidden=mode==='photo';$('video').hidden=true;$('photo').hidden=mode!=='photo';
+  capture.hidden=mode==='photo';$('video').hidden=mode!=='camera';$('photo').hidden=mode!=='photo';
   diagnostics.captureWidth=w;diagnostics.captureHeight=h;
   diagnostics.requestedBackend=cpuOnly?'cpu':'webgpu';
   draw(null,w,h);render();
@@ -163,7 +164,30 @@ $('continue').onclick=()=>{
  $('capture').hidden=true;$('video').hidden=mode!=='camera';$('photo').hidden=mode!=='photo';
  reset();setStatus(source?'captureReady':'stopped');
 };
-window.addEventListener('resize',()=>{if(resultSize)draw(item,resultSize.w,resultSize.h);});
+// Explicit media geometry avoids Safari retaining a shrunken video surface after capture.
+function previewRect(width,height,frameWidth,frameHeight){
+ const scale=Math.min(frameWidth/width,frameHeight/height);
+ return {width:width*scale,height:height*scale,left:(frameWidth-width*scale)/2,top:(frameHeight-height*scale)/2};
+}
+function fitPreview(){
+ if(!source)return;
+ const w=source.videoWidth||source.naturalWidth,h=source.videoHeight||source.naturalHeight;
+ const frame=$('camera').getBoundingClientRect();if(!w||!h||!frame.width||!frame.height)return;
+ const rect=previewRect(w,h,frame.width,frame.height);
+ for(const id of ['video','photo','capture']){
+  const style=$(id).style;
+  for(const key of ['width','height','left','top'])style[key]=`${rect[key]}px`;
+  style.right='auto';style.bottom='auto';
+ }
+ $('reticle').style.width=`${rect.width*.86}px`;
+ $('reticle').style.height=`${rect.height*.8}px`;
+ diagnostics.preview={sourceWidth:w,sourceHeight:h,displayWidth:Math.round(rect.width),displayHeight:Math.round(rect.height)};
+}
+function refreshPreview(){fitPreview();if(resultSize)draw(item,resultSize.w,resultSize.h);}
+window.addEventListener('resize',refreshPreview);
+$('video').addEventListener('resize',refreshPreview);
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(refreshPreview).observe($('camera'));
+
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)stop();});
 window.addEventListener('pagehide',()=>{stop();if(photoURL)URL.revokeObjectURL(photoURL);});
 render();
