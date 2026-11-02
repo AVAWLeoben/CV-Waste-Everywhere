@@ -23,7 +23,7 @@ let state='ready',status='',error='',item=null;const diagnostics={};
 Object.assign(words.de,{modelLoading:'Modell lädt …',retryModel:'Modell erneut laden',classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
 Object.assign(words.en,{modelLoading:'Loading model …',retryModel:'Retry model loading',classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.7.1", "build": "33.1-d72a09d", "builtAt": "2026-11-02 13:28 UTC"};
+const APP_BUILD={"version": "0.7.2", "build": "34.1-211ee97", "builtAt": "2026-11-02 13:39 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
@@ -74,6 +74,11 @@ let cpuOnly=false,modelFile=null,YOLOFactory=null,cpuReference=null,gpuDevice=nu
 // Install before model loading: GPU shaders may compile during load or first prediction.
 const shaderTasks=new Set();
 let shaderDiagnosticsInstalled=false;
+// Remove only an empty statement immediately before a WGSL continuing block.
+// No math, indexing, loop increments or model operations are changed.
+function compatibleShader(code){
+ return code.replace(/^[ \t]*;[ \t]*\r?\n(?=[ \t]*continuing[ \t]*\{)/gm,'');
+}
 function installShaderDiagnostics(){
  if(shaderDiagnosticsInstalled)return;
  const proto=globalThis.GPUDevice?.prototype;
@@ -81,6 +86,12 @@ function installShaderDiagnostics(){
  const original=proto.createShaderModule;
  try{
   proto.createShaderModule=function(descriptor){
+   const patched=compatibleShader(String(descriptor.code));
+   if(patched!==descriptor.code){
+    diagnostics.shaderWorkaround='remove empty statement before continuing';
+    diagnostics.shadersPatched=(diagnostics.shadersPatched||0)+1;
+    descriptor={...descriptor,code:patched};
+   }
    const shader=original.call(this,descriptor);
    if(shader.getCompilationInfo){
     const task=shader.getCompilationInfo().then(info=>{

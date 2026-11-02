@@ -108,6 +108,13 @@ console.log('PASS: two CPU comparisons, GPU-only after verification, later valid
 vm.runInContext(`globalThis.GPUDevice=class {createShaderModule(d){return {getCompilationInfo:async()=>({messages:[{type:'error',message:'Not a valid statement',lineNum:2,linePos:1}]})}}};installShaderDiagnostics();new GPUDevice().createShaderModule({label:'test',code:'loop {\\n;\\ncontinuing {}\\n}'});`,scope);
 await vm.runInContext('collectShaderDiagnostics()',scope);
 assert.equal(vm.runInContext('diagnostics.shaderCapture',scope),'enabled');
-assert.match(vm.runInContext('diagnostics.shaderErrors[0].messages[0].source',scope),/2: ;/);
+assert.match(vm.runInContext('diagnostics.shaderErrors[0].messages[0].source',scope),/2: continuing/);
 assert.equal(vm.runInContext('diagnostics.shaderErrors[0].messages[0].message',scope),'Not a valid statement');
 console.log('PASS: shader compiler message, line number and source excerpt capture');
+
+assert.equal(vm.runInContext("compatibleShader('loop {\\n  ;\\n  continuing {\\n i++;\\n }\\n}')",scope),'loop {\n  continuing {\n i++;\n }\n}');
+for(const code of ['i++;\ncontinuing {','for(var i=0;i<4;i++){',';\nlet x=1;','// ;\ncontinuing {']){
+ scope.shaderSample=code;assert.equal(vm.runInContext('compatibleShader(shaderSample)',scope),code);
+}
+assert.equal(vm.runInContext('diagnostics.shadersPatched',scope),1);
+console.log('PASS: targeted shader repair preserves loop increments and other statements');
