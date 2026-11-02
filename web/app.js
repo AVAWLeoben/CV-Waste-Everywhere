@@ -17,19 +17,34 @@ const bins={
 const common={bottle:'Flasche',person:'Person',cup:'Becher / Tasse',bowl:'Schüssel',banana:'Banane',apple:'Apfel',orange:'Orange',chair:'Stuhl',book:'Buch','cell phone':'Mobiltelefon'};
 let lang='de';try{lang=localStorage.getItem('waste-lang')||'de';}catch{}if(!words[lang])lang='de';
 let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0,previous=null,count=0,last=0;
+let phase='idle',resultSize=null;
 let state='ready',status='',error='',item=null;const diagnostics={};
 // Mobile scanning behaviour
+Object.assign(words.de,{classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
+Object.assign(words.en,{classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.5.0", "build": "25.1-4a83187", "builtAt": "2026-11-02 10:42 UTC"};
+const APP_BUILD={"version": "0.6.0", "build": "27.1-2cf9272", "builtAt": "2026-11-02 12:18 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
- $('versionDisclaimer').title=APP_BUILD.builtAt;
- $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n`+(lang==='de'?'Prototyp · Material und Sortierhinweise können falsch sein.':'Prototype · Material and sorting advice may be incorrect.');
+ $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n${APP_BUILD.builtAt}\n`+(lang==='de'?'Experimenteller Prototyp – Material und Sortierempfehlung können falsch sein.':'Experimental prototype – material and sorting advice may be incorrect.');
  diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
 }
 // Build identification end
 function render(){
+ renderVersion();
+ document.body.dataset.phase=phase;
+ $('classify').hidden=!source||phase==='result'||phase==='error';
+ $('classify').disabled=busy||!source;
+ $('classify').textContent=words[lang][phase==='processing'?'processing':'classify'];
+ $('continue').hidden=phase!=='result'&&phase!=='error';
+ $('continue').textContent=words[lang].continue;
+ $('reticle').hidden=!source||phase!=='preview';
+ $('image').disabled=busy;
+ $('choose').classList.toggle('disabled',busy);
+ $('start').disabled=busy;
+ $('camera').setAttribute('aria-busy',String(phase==='processing'));
+
  renderVersion();
  document.body.classList.toggle('scanning',!!source);
  document.documentElement.lang=lang;
@@ -43,10 +58,6 @@ function render(){
    $('name').textContent=lang==='de'?'Flasche – Material unklar':'Bottle – material uncertain';
    $('destination').textContent='';
    $('advice').textContent=lang==='de'?'Kunststoff oder Glas? Bitte am Gegenstand prüfen.':'Plastic or glass? Please check the item.';
-  }else if(mode==='camera' && count<2){
-   $('name').textContent=(lang==='de'?'Möglicherweise: ':'Possible: ')+$('name').textContent;
-   $('destination').textContent='';
-   $('advice').textContent=lang==='de'?'Erkennung wird bestätigt …':'Confirming recognition …';
   }
  }
  $('notice').textContent=manifest?words[lang][manifest.mode]:'';$('diagnostics').textContent=JSON.stringify({...diagnostics,backend:model?.device,error:error||undefined},null,2);
@@ -92,7 +103,7 @@ async function predictWithFallback(src,options){
   return result;
  }
 }
-function stop(){epoch++;stream?.getTracks().forEach(t=>t.stop());stream=null;source=null;mode=null;$('video').srcObject=null;$('video').hidden=true;$('photo').hidden=true;$('placeholder').hidden=false;$('stop').hidden=true;$('start').hidden=false;reset();state='ready';setStatus('stopped');}
+function stop(){epoch++;phase='idle';resultSize=null;$('capture').hidden=true;stream?.getTracks().forEach(t=>t.stop());stream=null;source=null;mode=null;$('video').srcObject=null;$('video').hidden=true;$('photo').hidden=true;$('placeholder').hidden=false;$('stop').hidden=true;$('start').hidden=false;reset();state='ready';setStatus('stopped');}
 $('stop').onclick=stop;
 $('start').onclick=async()=>{
  stop();const token=epoch;$('start').disabled=true;
@@ -101,36 +112,57 @@ $('start').onclick=async()=>{
  if(token!==epoch){next.getTracks().forEach(t=>t.stop());return;}
  if(next.getVideoTracks()[0]?.getSettings().facingMode==='user'){next.getTracks().forEach(t=>t.stop());throw Error('Rear camera required');}
  stream=next;$('video').srcObject=next;await $('video').play();if(token!==epoch)return;
- source=$('video');mode='camera';$('video').hidden=false;$('placeholder').hidden=true;$('stop').hidden=false;$('start').hidden=true;
+ source=$('video');mode='camera';phase='preview';$('video').hidden=false;$('placeholder').hidden=true;$('stop').hidden=false;$('start').hidden=true;
  }catch(e){if(token===epoch){stop();setStatus('cameraError',e.message);}return;}finally{$('start').disabled=false;}
- try{await ensureModel();if(token===epoch)setStatus('active');}catch(e){if(token===epoch)setStatus('modelError',e.message);}
+ if(token===epoch)setStatus('captureReady');
 };
 $('image').onchange=async()=>{
  const file=$('image').files[0];if(!file)return;stop();const token=epoch;if(photoURL)URL.revokeObjectURL(photoURL);photoURL=URL.createObjectURL(file);
- try{$('photo').src=photoURL;await $('photo').decode();if(token!==epoch)return;source=$('photo');mode='photo';$('photo').hidden=false;$('placeholder').hidden=true;}
+ try{$('photo').src=photoURL;await $('photo').decode();if(token!==epoch)return;source=$('photo');mode='photo';phase='preview';$('photo').hidden=false;$('placeholder').hidden=true;}
  catch(e){setStatus('imageError',e.message);return;}
- try{await ensureModel();if(token===epoch)setStatus('active');}catch(e){if(token===epoch)setStatus('modelError',e.message);}finally{$('image').value='';}
+ if(token===epoch)setStatus('captureReady');$('image').value='';
 };
 $('language').onclick=()=>{lang=lang==='de'?'en':'de';try{localStorage.setItem('waste-lang',lang);}catch{}render();};
-function iou(a,b){const area=x=>(x.x2-x.x1)*(x.y2-x.y1);const overlap=Math.max(0,Math.min(a.x2,b.x2)-Math.max(a.x1,b.x1))*Math.max(0,Math.min(a.y2,b.y2)-Math.max(a.y1,b.y1));return overlap/(area(a)+area(b)-overlap)||0;}
-function draw(b,w,h){const c=$('overlay'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.round(r.width*d);c.height=Math.round(r.height*d);if(!b)return;const ctx=c.getContext('2d');ctx.scale(d,d);const s=(mode==='camera'?Math.max:Math.min)(r.width/w,r.height/h),dx=(r.width-s*w)/2,dy=(r.height-s*h)/2;ctx.lineWidth=3;ctx.strokeStyle=({paper:'#ff0000',yellow:'#ffff00',colored:'#008000',clear:'#ffffff',bio:'#a52a2a',residual:'#000000'}[config.classes[b.cls]?.bin] || '#808080');ctx.strokeRect(dx+b.x1*s,dy+b.y1*s,(b.x2-b.x1)*s,(b.y2-b.y1)*s);}
-async function tick(now){
- requestAnimationFrame(tick);if(!model||!source||busy||document.hidden||error)return;
- const src=source,token=epoch,w=src.videoWidth||src.naturalWidth,h=src.videoHeight||src.naturalHeight;if(!w||!h)return;busy=true;last=now;
- try{const t=performance.now(),r=await predictWithFallback(src,{conf:config.confidence,iou:.65});if(token!==epoch)return;status='active';diagnostics.inferenceMs=Math.round(performance.now()-t);diagnostics.completed=(diagnostics.completed||0)+1;
+function draw(b,w,h){const c=$('overlay'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.round(r.width*d);c.height=Math.round(r.height*d);if(!b)return;const ctx=c.getContext('2d');ctx.scale(d,d);const s=Math.min(r.width/w,r.height/h),dx=(r.width-s*w)/2,dy=(r.height-s*h)/2;ctx.lineWidth=3;ctx.strokeStyle=({paper:'#ff0000',yellow:'#ffff00',colored:'#008000',clear:'#ffffff',bio:'#a52a2a',residual:'#000000'}[config.classes[b.cls]?.bin] || '#808080');ctx.strokeRect(dx+b.x1*s,dy+b.y1*s,(b.x2-b.x1)*s,(b.y2-b.y1)*s);}
+// One immutable full-frame snapshot per explicit user action. No inference loop.
+$('classify').onclick=async()=>{
+ if(busy||!source||phase!=='preview')return;
+ const src=source,token=epoch,w=src.videoWidth||src.naturalWidth,h=src.videoHeight||src.naturalHeight;
+ if(!w||!h)return;
+ busy=true;phase='processing';item=null;error='';state='processing';status='processing';
+ const capture=$('capture');
+ try{
+  capture.width=w;capture.height=h;capture.getContext('2d').drawImage(src,0,0,w,h);
+  capture.hidden=false;$('video').hidden=true;$('photo').hidden=true;
+  draw(null,w,h);render();
+  // Give the captured frame and processing label a chance to paint before invoking WASM.
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  if(token!==epoch)return;
+  await ensureModel();if(token!==epoch)return;
+  setStatus('processing');
+  const t=performance.now(),r=await predictWithFallback(capture,{conf:config.confidence,iou:.65});
+  if(token!==epoch)return;
+  diagnostics.inferenceMs=Math.round(performance.now()-t);diagnostics.completed=(diagnostics.completed||0)+1;
  const rw=r.width||w,rh=r.height||h,boxes=(r.boxes||[]).filter(b=>b.conf>=config.confidence&&[b.x1,b.y1,b.x2,b.y2].every(Number.isFinite)&&b.x2>b.x1&&b.y2>b.y1);
  diagnostics.detections=boxes.map(({cls,name,conf,x1,y1,x2,y2})=>({cls,name,conf,x1,y1,x2,y2}));
- const rank=b=>(b.x2-b.x1)*(b.y2-b.y1)/(rw*rh)*.65+(1-Math.min(1,Math.hypot((b.x1+b.x2)/2/rw-.5,(b.y1+b.y2)/2/rh-.5)*2))*.25+b.conf*.1;
- boxes.sort((a,b)=>rank(b)-rank(a));const b=boxes[0];item=null;
- if(!b){previous=null;count=0;state='search';draw(null,rw,rh);}
- else if(manifest.mode==='trained'&&boxes.some(x=>x!==b&&Math.abs(x.conf-b.conf)<.08&&iou(b,x)>.6&&config.classes[x.cls]?.bin!==config.classes[b.cls]?.bin)){previous=null;count=0;state='uncertain';draw(null,rw,rh);}
- else{count=previous&&previous.cls===b.cls&&iou(previous,b)>.35?count+1:1;previous=b;state='steady';item=b;draw(b,rw,rh);}render();
- }catch(e){if(token===epoch){reset();setStatus('inferError',e.message);}}finally{busy=false;}
-}
+ boxes.sort((a,b)=>b.conf-a.conf);const b=boxes[0];item=null;
+ if(!b){previous=null;count=0;state='noItem';draw(null,rw,rh);}
+ else{count=1;previous=b;state='steady';item=b;draw(b,rw,rh);}resultSize={w:rw,h:rh};phase='result';status='finished';render();
+
+ }catch(e){if(token===epoch){item=null;phase='error';state='uncertain';setStatus('inferError',String(e.message||e));}}
+ finally{busy=false;render();}
+};
+$('continue').onclick=()=>{
+ if(busy)return;
+ epoch++;phase=source?'preview':'idle';resultSize=null;error='';
+ $('capture').hidden=true;$('video').hidden=mode!=='camera';$('photo').hidden=mode!=='photo';
+ reset();setStatus(source?'captureReady':'stopped');
+};
+window.addEventListener('resize',()=>{if(resultSize)draw(item,resultSize.w,resultSize.h);});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)stop();});
 window.addEventListener('pagehide',()=>{stop();if(photoURL)URL.revokeObjectURL(photoURL);});
 render();
-requestAnimationFrame(tick);
+
 // Information dialog
 $('infoButton').onclick=()=>$('infoDialog').showModal();
 $('closeInfo').onclick=()=>$('infoDialog').close();

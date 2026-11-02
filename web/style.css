@@ -24,3 +24,16 @@ main{grid-template-rows:44px minmax(100px,1fr) 108px 44px 28px;gap:5px}
 #infoDialog #versionDisclaimer{height:auto;max-height:none;overflow:visible;margin:14px 0 0;font-size:11px;text-align:left}
 #camera{border-radius:12px}
 @media(max-height:480px){main{height:auto;min-height:100dvh;grid-template-rows:44px 140px 108px 44px 28px}}
+
+/* Capture / result flow: reserve a compact, stable result area. */
+main{grid-template-rows:44px minmax(100px,1fr) 108px 52px 32px}
+video,#capture{object-fit:contain;background:#15281e}
+#capture{z-index:1}#overlay{z-index:2}#privacy{z-index:4}
+#reticle{position:absolute;z-index:3;width:68%;height:66%;border:2px solid #ffffffb0;border-radius:24px;box-shadow:0 0 0 1px #0005;pointer-events:none}
+#reticle::after{content:'+';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#ffffffa0;font-size:24px;font-weight:200}
+#stop{background:transparent;color:#173f32;font-size:11px;padding:0 6px}
+.primary{font-size:16px;letter-spacing:.04em}
+#status{height:32px;line-height:16px}
+.choose.disabled{opacity:.45;pointer-events:none}
+body[data-phase="processing"] #camera{outline:2px solid #8abd79;outline-offset:-2px}
+@media(max-height:480px){main{height:auto;min-height:100dvh;grid-template-rows:44px 140px 108px 52px 32px}}
