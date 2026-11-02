@@ -23,7 +23,7 @@ let state='ready',status='',error='',item=null;const diagnostics={};
 Object.assign(words.de,{modelLoading:'Modell lädt …',retryModel:'Modell erneut laden',classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
 Object.assign(words.en,{modelLoading:'Loading model …',retryModel:'Retry model loading',classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.6.3", "build": "30.1-87a5ebf", "builtAt": "2026-11-02 12:48 UTC"};
+const APP_BUILD={"version": "0.6.4", "build": "31.1-937cfad", "builtAt": "2026-11-02 12:54 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
@@ -136,7 +136,7 @@ $('image').onchange=async()=>{
  if(token===epoch)void preparePreview(token);$('image').value='';
 };
 $('language').onclick=()=>{lang=lang==='de'?'en':'de';try{localStorage.setItem('waste-lang',lang);}catch{}render();};
-function draw(b,w,h){const c=$('overlay'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.round(r.width*d);c.height=Math.round(r.height*d);if(!b)return;const ctx=c.getContext('2d');ctx.scale(d,d);const s=Math.min(r.width/w,r.height/h),dx=(r.width-s*w)/2,dy=(r.height-s*h)/2;ctx.lineWidth=3;ctx.strokeStyle=({paper:'#ff0000',yellow:'#ffff00',colored:'#008000',clear:'#ffffff',bio:'#a52a2a',residual:'#000000'}[config.classes[b.cls]?.bin] || '#808080');ctx.strokeRect(dx+b.x1*s,dy+b.y1*s,(b.x2-b.x1)*s,(b.y2-b.y1)*s);}
+function draw(b,w,h){const c=$('overlay'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.round(r.width*d);c.height=Math.round(r.height*d);if(!b)return;const ctx=c.getContext('2d');ctx.scale(d,d);const {width:displayWidth,left:dx,top:dy}=previewRect(w,h,r.width,r.height),s=displayWidth/w;ctx.lineWidth=3;ctx.strokeStyle=({paper:'#ff0000',yellow:'#ffff00',colored:'#008000',clear:'#ffffff',bio:'#a52a2a',residual:'#000000'}[config.classes[b.cls]?.bin] || '#808080');ctx.strokeRect(dx+b.x1*s,dy+b.y1*s,(b.x2-b.x1)*s,(b.y2-b.y1)*s);}
 // One immutable full-frame snapshot per explicit user action. No inference loop.
 $('classify').onclick=async()=>{
  if(busy||!source||phase!=='preview')return;
@@ -177,7 +177,7 @@ $('continue').onclick=()=>{
 };
 // Explicit media geometry avoids Safari retaining a shrunken video surface after capture.
 function previewRect(width,height,frameWidth,frameHeight){
- const scale=Math.min(frameWidth/width,frameHeight/height);
+ const scale=Math.max(frameWidth/width,frameHeight/height);
  return {width:width*scale,height:height*scale,left:(frameWidth-width*scale)/2,top:(frameHeight-height*scale)/2};
 }
 function fitPreview(){
@@ -190,8 +190,8 @@ function fitPreview(){
   for(const key of ['width','height','left','top'])style[key]=`${rect[key]}px`;
   style.right='auto';style.bottom='auto';
  }
- $('reticle').style.width=`${rect.width*.86}px`;
- $('reticle').style.height=`${rect.height*.8}px`;
+ $('reticle').style.width=`${frame.width*.86}px`;
+ $('reticle').style.height=`${frame.height*.8}px`;
  diagnostics.preview={sourceWidth:w,sourceHeight:h,displayWidth:Math.round(rect.width),displayHeight:Math.round(rect.height)};
 }
 function refreshPreview(){fitPreview();if(resultSize)draw(item,resultSize.w,resultSize.h);}

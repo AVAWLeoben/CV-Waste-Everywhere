@@ -48,9 +48,15 @@ assert.equal(vm.runInContext('cpuOnly',scope),true);
 console.log('PASS: photo display continuity and CPU compatibility default');
 
 const rect=vm.runInContext('previewRect(1080,1920,373,397)',scope);
-assert.equal(rect.height,397);assert.equal(rect.width,397*1080/1920);
-assert.equal(rect.top,0);assert.equal(rect.left,(373-rect.width)/2);
-console.log('PASS: portrait preview fills available height without cropping or stretching');
+assert.equal(rect.width,373);assert.equal(rect.height,373*1920/1080);
+assert.equal(rect.left,0);assert.equal(rect.top,(397-rect.height)/2);
+for(const [w,h,fw,fh] of [[1080,1920,373,397],[1920,1080,373,397],[640,640,373,397]]){
+ const g=vm.runInContext(`previewRect(${w},${h},${fw},${fh})`,scope);
+ assert(g.width>=fw-1e-9&&g.height>=fh-1e-9);
+ assert(Math.abs(g.left+g.width/2-fw/2)<1e-9);
+ assert(Math.abs(g.top+g.height/2-fh/2)<1e-9);
+}
+console.log('PASS: centred cover geometry for portrait, landscape and square images');
 
 // Loading starts during preview, gates CLASSIFY, and never invokes prediction.
 el('continue').onclick();
