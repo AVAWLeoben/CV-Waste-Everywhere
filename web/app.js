@@ -23,10 +23,10 @@ let state='ready',status='',error='',item=null;const diagnostics={};
 Object.assign(words.de,{modelLoading:'Modell lädt …',retryModel:'Modell erneut laden',classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
 Object.assign(words.en,{modelLoading:'Loading model …',retryModel:'Retry model loading',classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.6.4", "build": "31.1-937cfad", "builtAt": "2026-11-02 12:54 UTC"};
+const APP_BUILD={"version": "0.7.0", "build": "32.1-32e1534", "builtAt": "2026-11-02 13:13 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
- const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
+ const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
  $('versionDisclaimer').textContent=`v${APP_BUILD.version} · Build ${APP_BUILD.build} · ${modelInfo}\n${APP_BUILD.builtAt}\n`+(lang==='de'?'Experimenteller Prototyp – Material und Sortierempfehlung können falsch sein.':'Experimental prototype – material and sorting advice may be incorrect.');
  diagnostics.appVersion=APP_BUILD.version;diagnostics.appBuild=APP_BUILD.build;
 }
@@ -68,10 +68,16 @@ function setStatus(key,e=''){status=key;error=e;render();}
 function reset(){previous=null;count=0;item=null;state='search';const c=$('overlay');c.getContext('2d').clearRect(0,0,c.width,c.height);render();}
 async function json(path){const r=await fetch(path);if(!r.ok)throw Error(`${path}: HTTP ${r.status}`);return r.json();}
 
-// Classroom model loading: same YOLO.load(File) / predict(image) API as DSL.
-// Keep the JavaScript import map and the WebAssembly assets on 2.5.3.
-// Compatibility build: bypass the device-specific WebGPU result corruption under investigation.
-let cpuOnly=true;
+// Pinned loader 0.0.55 checks full GPU delegation before selecting WebGPU.
+const LITERT_WASM='https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/';
+let cpuOnly=false,modelFile=null,YOLOFactory=null,cpuReference=null,gpuDevice=null,gpuFault='',gpuChecks=0;
+async function cpuModel(){
+ if(!cpuReference){
+  cpuReference=await YOLOFactory.load(modelFile,{device:'cpu',litertWasmUrl:LITERT_WASM});
+  if(cpuReference.device!=='cpu'){cpuReference.free();cpuReference=null;throw Error('CPU verification backend unavailable');}
+ }
+ return cpuReference;
+}
 async function ensureModel(){
  if(model)return model;if(loading)return loading;
  loading=(async()=>{
@@ -79,32 +85,103 @@ async function ensureModel(){
   [config,manifest]=await Promise.all([json('./config.json'),json('./models/manifest.json')]);
   if(manifest.pipeline!=='classroom'||manifest.mode!=='trained'||typeof manifest.model!=='string'||!manifest.model.endsWith('.pt'))throw Error('Expected the trained YOLO classroom-compatible export');
   if(JSON.stringify(manifest.prompts)!==JSON.stringify(config.classes.map(c=>c.prompt)))throw Error('Model vocabulary mismatch');
-  diagnostics.end2end=manifest.end2end;diagnostics.model=manifest.model;diagnostics.mode=manifest.mode;diagnostics.inputSize=manifest.inputSize;render();
-  const {YOLO}=await import('@ultralytics/yolo');
-  const response=await fetch(new URL('./models/'+manifest.file,location.href));
-  if(!response.ok)throw Error(`Model HTTP ${response.status}`);
-  const file=new File([await response.blob()],manifest.file,{type:'application/octet-stream'});
-  model=await YOLO.load(file,{
-   device:cpuOnly?'cpu':'webgpu',
-   litertWasmUrl:'https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/'
-  });
+  Object.assign(diagnostics,{end2end:manifest.end2end,model:manifest.model,mode:manifest.mode,inputSize:manifest.inputSize,loaderVersion:'0.0.55',gpuVerification:'pending'});render();
+  YOLOFactory=(await import('@ultralytics/yolo')).YOLO;
+  if(!modelFile){
+   const response=await fetch(new URL('./models/'+manifest.file,location.href));
+   if(!response.ok)throw Error(`Model HTTP ${response.status}`);
+   modelFile=new File([await response.blob()],manifest.file,{type:'application/octet-stream'});
+  }
+  let candidate;
+  try{
+   candidate=await YOLOFactory.load(modelFile,{device:cpuOnly?'cpu':'webgpu',litertWasmUrl:LITERT_WASM});
+   if(candidate.device==='webgpu'){
+    const core=await import('@litertjs/core');gpuDevice=core.getWebGpuDevice();
+    if(!gpuDevice?.pushErrorScope)throw Error('WebGPU validation is unavailable');
+    gpuDevice.addEventListener('uncapturederror',event=>{gpuFault=event.error?.message||'Uncaptured WebGPU error';});
+    gpuDevice.lost.then(info=>{gpuFault=`WebGPU device lost: ${info.message||info.reason}`;});
+    // Compile CPU reference during preview too; CLASSIFY never waits for its initial download.
+    await cpuModel();
+   }else{cpuOnly=true;diagnostics.gpuVerification='not used';diagnostics.fallback='Runtime selected CPU (GPU unavailable, compilation failed, or partial delegation)';}
+   model=candidate;
+  }catch(e){
+   try{candidate?.free();}catch{}
+   cpuOnly=true;diagnostics.gpuError=String(e.message||e);diagnostics.fallback='cpu';diagnostics.gpuVerification='fallback';
+   model=await cpuModel();
+  }
   return model;
  })();
  try{return await loading;}finally{loading=null;}
 }
-async function predictWithFallback(src,options){
- try{return await model.predict(src,options);}
- catch(e){
-  if(cpuOnly||model?.device!=='webgpu')throw e;
-  // A GPU can compile successfully and still fail when invoking the model.
-  // Retry the entire model on CPU once, using the public loader API.
-  cpuOnly=true;diagnostics.fallback='cpu';diagnostics.gpuError=String(e.message||e);
-  const failed=model;model=null;
-  try{failed.free();}catch{}
-  await ensureModel();
-  const result=await model.predict(src,options);
-  return result;
+function validDetections(result){
+ return Array.isArray(result?.boxes)&&result.boxes.every(b=>Number.isInteger(b.cls)&&b.cls>=0&&b.cls<config.classes.length&&Number.isFinite(b.conf)&&b.conf>=0&&b.conf<=1&&[b.x1,b.y1,b.x2,b.y2].every(Number.isFinite)&&b.x2>=b.x1&&b.y2>=b.y1);
+}
+function compareDetections(gpu,cpu,w,h){
+ if(!validDetections(gpu)||!validDetections(cpu))return 'Invalid detection values';
+ if(gpu.boxes.length!==cpu.boxes.length)return 'CPU/GPU detection counts differ';
+ const remaining=[...cpu.boxes];
+ const tolerance=2+Math.max(w,h)*.005;
+ for(const a of [...gpu.boxes].sort((a,b)=>b.conf-a.conf)){
+  const i=remaining.findIndex(b=>a.cls===b.cls&&Math.abs(a.conf-b.conf)<=.02&&['x1','y1','x2','y2'].every(k=>Math.abs(a[k]-b[k])<=tolerance));
+  if(i<0)return 'CPU/GPU classes, confidence or boxes differ';
+  remaining.splice(i,1);
  }
+ return '';
+}
+function paddingOutput(result,w,h){
+ // Match the complete known corruption signature, never confidence alone.
+ const size=manifest.inputSize,scale=Math.min(size/w,size/h);
+ const px=Math.round((size-Math.round(w*scale))/2-.1),py=Math.round((size-Math.round(h*scale))/2-.1),v=114/255;
+ return result.boxes.some(b=>Math.abs(b.conf-v)<1e-5&&[
+  ((b.x1+b.x2)/2*scale+px)/size,((b.y1+b.y2)/2*scale+py)/size,
+  (b.x2-b.x1)*scale/size,(b.y2-b.y1)*scale/size
+ ].every(x=>Math.abs(x-v)<1e-4));
+}
+async function checkedGpuPrediction(src,options){
+ if(gpuFault)throw Error(gpuFault);
+ if(!gpuDevice)throw Error('No WebGPU validation device');
+ const scopes=['validation','internal','out-of-memory'];
+ for(const type of scopes)gpuDevice.pushErrorScope(type);
+ let result,failure;
+ try{result=await model.predict(src,options);await gpuDevice.queue.onSubmittedWorkDone();}
+ catch(e){failure=e;}
+ finally{
+  for(let i=scopes.length-1;i>=0;i--){
+   try{const err=await gpuDevice.popErrorScope();if(err)failure=Error(err.message);}catch(e){failure=e;}
+  }
+ }
+ if(failure)throw failure;if(gpuFault)throw Error(gpuFault);
+ if(!validDetections(result))throw Error('Invalid GPU output');
+ if(paddingOutput(result,src.width,src.height))throw Error('GPU output matches input-padding corruption');
+ return result;
+}
+async function fallbackToCpu(reason,src,options,referenceResult){
+ const failed=model;cpuOnly=true;diagnostics.fallback='cpu';diagnostics.gpuError=String(reason.message||reason);diagnostics.gpuVerification='fallback';
+ try{failed?.free();}catch{}model=null;
+ model=await cpuModel();
+ return referenceResult||await model.predict(src,options);
+}
+async function predictWithFallback(src,options){
+ diagnostics.verificationPerformed=false;
+ if(model.device!=='webgpu')return model.predict(src,options);
+ let referenceResult;
+ try{
+  const start=performance.now(),result=await checkedGpuPrediction(src,options);
+  diagnostics.gpuPredictionMs=Math.round(performance.now()-start);
+  if(gpuChecks<2){
+   diagnostics.verificationPerformed=true;
+   const reference=await cpuModel(),t=performance.now();
+   referenceResult=await reference.predict(src,options);
+   diagnostics.cpuVerificationMs=Math.round(performance.now()-t);
+   if(!validDetections(referenceResult))throw Error('Invalid CPU verification output');
+   const difference=compareDetections(result,referenceResult,src.width,src.height);
+   if(difference)throw Error(difference);
+   gpuChecks++;diagnostics.gpuChecksPassed=gpuChecks;diagnostics.gpuVerification=gpuChecks===2?'passed':'1 of 2 passed';
+   // Release the second model after verification to avoid retaining two weight sets.
+   if(gpuChecks===2){cpuReference.free();cpuReference=null;}
+  }
+  return result;
+ }catch(e){return fallbackToCpu(e,src,options,validDetections(referenceResult)?referenceResult:null);}
 }
 // Load and compile while the user frames the item; never run prediction here.
 async function preparePreview(token=epoch){

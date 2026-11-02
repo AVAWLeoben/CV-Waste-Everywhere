@@ -87,15 +87,21 @@ try{
   assert.equal(d.model,JSON.parse(readFileSync('site/models/manifest.json')).model);
   assert(Array.isArray(d.detections));
   for(const b of d.detections)assert([b.conf,b.x1,b.y1,b.x2,b.y2].every(Number.isFinite));
-  if(forceCPU || JSON.parse(readFileSync('site/models/manifest.json')).end2end)assert.equal(d.backend,'cpu');
+  if(forceCPU)assert.equal(d.backend,'cpu');
   const first=d.completed;
   await new Promise(r=>setTimeout(r,500));
   assert.equal(JSON.parse(await live.locator('#diagnostics').textContent()).completed,first,'Unexpected automatic inference');
   await live.locator('#continue').click();
+  // A different portrait input also exercises letterboxing and stale-output failures.
+  const portrait=await live.evaluate(()=>{const c=document.createElement('canvas');c.width=720;c.height=1280;const g=c.getContext('2d');g.fillStyle='#f5e1be';g.fillRect(0,0,720,1280);g.fillStyle='#903b64';g.fillRect(20,380,670,300);return c.toDataURL().split(',')[1];});
+  await live.locator('#image').setInputFiles({name:'portrait-test.png',mimeType:'image/png',buffer:Buffer.from(portrait,'base64')});
   await live.locator('#classify').click();
   await live.waitForFunction(n=>JSON.parse(document.querySelector('#diagnostics').textContent).completed===n,first+1,{timeout:240000});
   assert(await live.locator('#continue').isVisible(),'Second capture did not finish');
-  reports.push({forceCPU,backend:d.backend,fallback:d.fallback,completed:true,detections:d.detections});
+  d=JSON.parse(await live.locator('#diagnostics').textContent());
+  assert(!d.error,d.error);
+  if(d.backend==='webgpu'){assert.equal(d.gpuChecksPassed,2);assert.equal(d.gpuVerification,'passed');}
+  reports.push({forceCPU,backend:d.backend,fallback:d.fallback,gpuVerification:d.gpuVerification,gpuError:d.gpuError,completed:true,detections:d.detections});
   await ctx.close();
  }
  const path='site/models/validation.json',report=JSON.parse(readFileSync(path));

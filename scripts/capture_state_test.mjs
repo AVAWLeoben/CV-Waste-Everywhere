@@ -44,8 +44,8 @@ assert.equal(el('start').hidden,true);
 await el('classify').onclick();
 assert.equal(el('photo').hidden,false);assert.equal(el('capture').hidden,true);
 el('continue').onclick();assert.equal(el('photo').hidden,false);assert.equal(el('capture').hidden,true);
-assert.equal(vm.runInContext('cpuOnly',scope),true);
-console.log('PASS: photo display continuity and CPU compatibility default');
+assert.equal(vm.runInContext('cpuOnly',scope),false);
+console.log('PASS: photo display continuity and GPU preference');
 
 const rect=vm.runInContext('previewRect(1080,1920,373,397)',scope);
 assert.equal(rect.width,373);assert.equal(rect.height,373*1920/1080);
@@ -71,3 +71,37 @@ assert.match(el('diagnostics').textContent,/download failed/);
 vm.runInContext("ensureModel=async()=>{model={device:'cpu'};return model}",scope);
 await el('classify').onclick();assert.equal(scope.calls,before);assert.equal(el('classify').textContent,'CLASSIFY');
 console.log('PASS: preview preload, readiness gating, no preload inference, failed-load retry');
+// Exercise GPU safety decisions without requiring a physical GPU.
+const good={boxes:[{cls:0,conf:.9,x1:20,y1:30,x2:180,y2:300}]};
+scope.good=good;
+vm.runInContext(`
+globalThis.cpuCalls=0;globalThis.gpuCalls=0;globalThis.freed=0;
+gpuDevice={pushErrorScope(){},popErrorScope:async()=>null,queue:{onSubmittedWorkDone:async()=>{}}};
+gpuFault='';gpuChecks=0;cpuOnly=false;
+function testCpu(){return {device:'cpu',predict:async()=>{cpuCalls++;return good},free(){freed++}}}
+YOLOFactory={load:async()=>testCpu()};cpuReference=testCpu();
+model={device:'webgpu',predict:async()=>{gpuCalls++;return good},free(){freed++}};
+`,scope);
+const frame={width:720,height:1280};scope.frame=frame;
+for(let i=0;i<3;i++)await vm.runInContext('predictWithFallback(frame,{})',scope);
+assert.equal(scope.cpuCalls,2);assert.equal(scope.gpuCalls,3);
+assert.equal(vm.runInContext('diagnostics.gpuVerification',scope),'passed');
+assert.equal(vm.runInContext('cpuReference',scope),null);
+// A later GPU validation failure falls back even after both comparisons passed.
+vm.runInContext("gpuDevice.popErrorScope=async()=>({message:'invalid shader'})",scope);
+assert.deepEqual(await vm.runInContext('predictWithFallback(frame,{})',scope),good);
+assert.equal(vm.runInContext('model.device',scope),'cpu');
+assert.match(vm.runInContext('diagnostics.gpuError',scope),/invalid shader/);
+// A plausible finite but different GPU result is never displayed.
+vm.runInContext(`gpuChecks=0;cpuOnly=false;gpuDevice.popErrorScope=async()=>null;gpuFault='';
+model={device:'webgpu',predict:async()=>({boxes:[{cls:1,conf:.8,x1:20,y1:30,x2:180,y2:300}]}),free(){}};`,scope);
+assert.deepEqual(await vm.runInContext('predictWithFallback(frame,{})',scope),good);
+assert.equal(vm.runInContext('model.device',scope),'cpu');
+// The exact padding signature is rejected, but confidence 114/255 alone is legal.
+scope.padding={boxes:[{cls:0,conf:114/255,x1:6.117645263671875,y1:286.1176452636719,x2:578.3529052734375,y2:858.3529052734375}]};
+assert.equal(vm.runInContext('paddingOutput(padding,720,1280)',scope),true);
+assert.equal(vm.runInContext('paddingOutput({boxes:[{...good.boxes[0],conf:114/255}]},720,1280)',scope),false);
+vm.runInContext("cpuOnly=false;gpuChecks=2;model={device:'webgpu',predict:async()=>padding,free(){}}",scope);
+assert.deepEqual(await vm.runInContext('predictWithFallback(frame,{})',scope),good);
+assert.match(vm.runInContext('diagnostics.gpuError',scope),/padding/);
+console.log('PASS: two CPU comparisons, GPU-only after verification, later validation failure, silent mismatch and padding fallback');
