@@ -14,6 +14,7 @@ try{
  await page.addInitScript(()=>{Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async()=>{const c=document.createElement('canvas');c.width=480;c.height=640;const g=c.getContext('2d');g.fillStyle='gray';g.fillRect(0,0,480,640);return c.captureStream(15);}}});});
  await page.goto('http://127.0.0.1:8011/web/');await page.locator('#start').click();
  await page.waitForFunction(()=>document.querySelector('#classify').hidden===false);
+ await page.waitForFunction(()=>!document.querySelector('#classify').disabled);
  assert.equal(await page.evaluate(()=>window.calls||0),0);
  const initial=await page.locator('#video').boundingBox();
  const frame=await page.locator('#camera').boundingBox();

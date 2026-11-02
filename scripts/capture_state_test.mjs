@@ -51,3 +51,17 @@ const rect=vm.runInContext('previewRect(1080,1920,373,397)',scope);
 assert.equal(rect.height,397);assert.equal(rect.width,397*1080/1920);
 assert.equal(rect.top,0);assert.equal(rect.left,(373-rect.width)/2);
 console.log('PASS: portrait preview fills available height without cropping or stretching');
+
+// Loading starts during preview, gates CLASSIFY, and never invokes prediction.
+el('continue').onclick();
+vm.runInContext("model=null;phase='preview';globalThis.releaseLoad=null;ensureModel=()=>new Promise(resolve=>{globalThis.releaseLoad=()=>{model={device:'cpu'};resolve(model)}})",scope);
+const before=scope.calls;const preload=vm.runInContext('preparePreview()',scope);
+assert.equal(el('classify').disabled,true);assert.equal(el('photo').hidden,false);
+await el('classify').onclick();assert.equal(scope.calls,before);
+scope.releaseLoad();await preload;assert.equal(el('classify').disabled,false);assert.equal(scope.calls,before);
+vm.runInContext("model=null;ensureModel=async()=>{throw Error('download failed')}",scope);
+await vm.runInContext('preparePreview()',scope);assert.equal(el('classify').disabled,false);
+assert.match(el('diagnostics').textContent,/download failed/);
+vm.runInContext("ensureModel=async()=>{model={device:'cpu'};return model}",scope);
+await el('classify').onclick();assert.equal(scope.calls,before);assert.equal(el('classify').textContent,'CLASSIFY');
+console.log('PASS: preview preload, readiness gating, no preload inference, failed-load retry');

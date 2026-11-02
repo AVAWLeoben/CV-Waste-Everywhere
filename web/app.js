@@ -20,10 +20,10 @@ let config,manifest,model,loading,stream,source,mode,photoURL,busy=false,epoch=0
 let phase='idle',resultSize=null;
 let state='ready',status='',error='',item=null;const diagnostics={};
 // Mobile scanning behaviour
-Object.assign(words.de,{classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
-Object.assign(words.en,{classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
+Object.assign(words.de,{modelLoading:'Modell lädt …',retryModel:'Modell erneut laden',classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
+Object.assign(words.en,{modelLoading:'Loading model …',retryModel:'Retry model loading',classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.6.2", "build": "29.1-9b9e801", "builtAt": "2026-11-02 12:41 UTC"};
+const APP_BUILD={"version": "0.6.3", "build": "30.1-87a5ebf", "builtAt": "2026-11-02 12:48 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end · CPU/WASM" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
@@ -36,8 +36,8 @@ function render(){
  document.body.dataset.phase=phase;
  fitPreview();
  $('classify').hidden=!source||phase==='result'||phase==='error';
- $('classify').disabled=busy||!source;
- $('classify').textContent=words[lang][phase==='processing'?'processing':'classify'];
+ $('classify').disabled=busy||!source||(!model&&status!=='modelError');
+ $('classify').textContent=words[lang][phase==='processing'?'processing':!model?(status==='modelError'?'retryModel':'modelLoading'):'classify'];
  $('continue').hidden=phase!=='result'&&phase!=='error';
  $('continue').textContent=words[lang].continue;
  $('reticle').hidden=!source||phase!=='preview';
@@ -106,6 +106,16 @@ async function predictWithFallback(src,options){
   return result;
  }
 }
+// Load and compile while the user frames the item; never run prediction here.
+async function preparePreview(token=epoch){
+ setStatus(model?'captureReady':'loading');
+ try{
+  await ensureModel();
+  if(token===epoch&&source&&phase==='preview')setStatus('captureReady');
+ }catch(e){
+  if(token===epoch&&source&&phase==='preview')setStatus('modelError',String(e.message||e));
+ }
+}
 function stop(){epoch++;phase='idle';resultSize=null;$('capture').hidden=true;stream?.getTracks().forEach(t=>t.stop());stream=null;source=null;mode=null;$('video').srcObject=null;$('video').hidden=true;$('photo').hidden=true;$('placeholder').hidden=false;$('stop').hidden=true;$('start').hidden=false;reset();state='ready';setStatus('stopped');}
 $('stop').onclick=stop;
 $('start').onclick=async()=>{
@@ -117,19 +127,20 @@ $('start').onclick=async()=>{
  stream=next;$('video').srcObject=next;await $('video').play();if(token!==epoch)return;
  source=$('video');mode='camera';phase='preview';$('video').hidden=false;$('placeholder').hidden=true;$('stop').hidden=false;$('start').hidden=true;
  }catch(e){if(token===epoch){stop();setStatus('cameraError',e.message);}return;}finally{$('start').disabled=false;}
- if(token===epoch)setStatus('captureReady');
+ if(token===epoch)void preparePreview(token);
 };
 $('image').onchange=async()=>{
  const file=$('image').files[0];if(!file)return;stop();const token=epoch;if(photoURL)URL.revokeObjectURL(photoURL);photoURL=URL.createObjectURL(file);
  try{$('photo').src=photoURL;await $('photo').decode();if(token!==epoch)return;source=$('photo');mode='photo';phase='preview';$('photo').hidden=false;$('placeholder').hidden=true;}
  catch(e){setStatus('imageError',e.message);return;}
- if(token===epoch)setStatus('captureReady');$('image').value='';
+ if(token===epoch)void preparePreview(token);$('image').value='';
 };
 $('language').onclick=()=>{lang=lang==='de'?'en':'de';try{localStorage.setItem('waste-lang',lang);}catch{}render();};
 function draw(b,w,h){const c=$('overlay'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.round(r.width*d);c.height=Math.round(r.height*d);if(!b)return;const ctx=c.getContext('2d');ctx.scale(d,d);const s=Math.min(r.width/w,r.height/h),dx=(r.width-s*w)/2,dy=(r.height-s*h)/2;ctx.lineWidth=3;ctx.strokeStyle=({paper:'#ff0000',yellow:'#ffff00',colored:'#008000',clear:'#ffffff',bio:'#a52a2a',residual:'#000000'}[config.classes[b.cls]?.bin] || '#808080');ctx.strokeRect(dx+b.x1*s,dy+b.y1*s,(b.x2-b.x1)*s,(b.y2-b.y1)*s);}
 // One immutable full-frame snapshot per explicit user action. No inference loop.
 $('classify').onclick=async()=>{
  if(busy||!source||phase!=='preview')return;
+ if(!model){if(status==='modelError')await preparePreview();return;}
  const src=source,token=epoch,w=src.videoWidth||src.naturalWidth,h=src.videoHeight||src.naturalHeight;
  if(!w||!h)return;
  busy=true;phase='processing';item=null;error='';state='processing';status='processing';
