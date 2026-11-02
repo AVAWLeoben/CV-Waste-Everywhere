@@ -23,7 +23,7 @@ let state='ready',status='',error='',item=null;const diagnostics={};
 Object.assign(words.de,{modelLoading:'Modell lädt …',retryModel:'Modell erneut laden',classify:'CLASSIFY',continue:'Weiter',processing:'Bild wird ausgewertet …',captureReady:'Gegenstand ausrichten und CLASSIFY drücken.',finished:'Auswertung abgeschlossen.',noItem:'Kein eindeutiger Gegenstand erkannt',inferError:'Auswertung fehlgeschlagen. Weiter drücken und erneut versuchen.'});
 Object.assign(words.en,{modelLoading:'Loading model …',retryModel:'Retry model loading',classify:'CLASSIFY',continue:'Continue',processing:'Classifying captured image …',captureReady:'Frame one item, then press CLASSIFY.',finished:'Analysis complete.',noItem:'No clear object detected',inferError:'Analysis failed. Press Continue and try again.'});
 // Build identification start
-const APP_BUILD={"version": "0.7.0", "build": "32.1-32e1534", "builtAt": "2026-11-02 13:13 UTC"};
+const APP_BUILD={"version": "0.7.1", "build": "33.1-d72a09d", "builtAt": "2026-11-02 13:28 UTC"};
 function renderVersion(){
  const size=manifest?.inputSize;
  const modelInfo=size ? `${manifest.architecture || "YOLO detector"} · ${manifest.model} · ${size}×${size}${manifest.end2end ? " · End-to-end" : ""}` : (lang==='de'?'Modell noch nicht geladen':'Model not loaded yet');
@@ -71,6 +71,38 @@ async function json(path){const r=await fetch(path);if(!r.ok)throw Error(`${path
 // Pinned loader 0.0.55 checks full GPU delegation before selecting WebGPU.
 const LITERT_WASM='https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/';
 let cpuOnly=false,modelFile=null,YOLOFactory=null,cpuReference=null,gpuDevice=null,gpuFault='',gpuChecks=0;
+// Install before model loading: GPU shaders may compile during load or first prediction.
+const shaderTasks=new Set();
+let shaderDiagnosticsInstalled=false;
+function installShaderDiagnostics(){
+ if(shaderDiagnosticsInstalled)return;
+ const proto=globalThis.GPUDevice?.prototype;
+ if(!proto?.createShaderModule){diagnostics.shaderCapture='unavailable';return;}
+ const original=proto.createShaderModule;
+ try{
+  proto.createShaderModule=function(descriptor){
+   const shader=original.call(this,descriptor);
+   if(shader.getCompilationInfo){
+    const task=shader.getCompilationInfo().then(info=>{
+     const errors=[...info.messages].filter(m=>m.type==='error');
+     if(!errors.length)return;
+     diagnostics.shaderErrors??=[];
+     if(diagnostics.shaderErrors.length>=8)return;
+     const lines=String(descriptor.code||'').split('\n');
+     diagnostics.shaderErrors.push({label:descriptor.label||'',messages:errors.slice(0,4).map(m=>({
+      message:m.message,line:m.lineNum,column:m.linePos,
+      source:lines.slice(Math.max(0,m.lineNum-4),m.lineNum+3).map((line,i)=>`${Math.max(0,m.lineNum-4)+i+1}: ${line}`).join('\n')
+     }))});
+     render();
+    }).catch(e=>{diagnostics.shaderCaptureError=String(e.message||e);});
+    shaderTasks.add(task);task.finally(()=>shaderTasks.delete(task));
+   }
+   return shader;
+  };
+  shaderDiagnosticsInstalled=true;diagnostics.shaderCapture='enabled';
+ }catch(e){diagnostics.shaderCapture=String(e.message||e);}
+}
+async function collectShaderDiagnostics(){await Promise.allSettled([...shaderTasks]);}
 async function cpuModel(){
  if(!cpuReference){
   cpuReference=await YOLOFactory.load(modelFile,{device:'cpu',litertWasmUrl:LITERT_WASM});
@@ -92,6 +124,7 @@ async function ensureModel(){
    if(!response.ok)throw Error(`Model HTTP ${response.status}`);
    modelFile=new File([await response.blob()],manifest.file,{type:'application/octet-stream'});
   }
+  installShaderDiagnostics();
   let candidate;
   try{
    candidate=await YOLOFactory.load(modelFile,{device:cpuOnly?'cpu':'webgpu',litertWasmUrl:LITERT_WASM});
@@ -105,6 +138,7 @@ async function ensureModel(){
    }else{cpuOnly=true;diagnostics.gpuVerification='not used';diagnostics.fallback='Runtime selected CPU (GPU unavailable, compilation failed, or partial delegation)';}
    model=candidate;
   }catch(e){
+   await collectShaderDiagnostics();
    try{candidate?.free();}catch{}
    cpuOnly=true;diagnostics.gpuError=String(e.message||e);diagnostics.fallback='cpu';diagnostics.gpuVerification='fallback';
    model=await cpuModel();
@@ -150,6 +184,7 @@ async function checkedGpuPrediction(src,options){
    try{const err=await gpuDevice.popErrorScope();if(err)failure=Error(err.message);}catch(e){failure=e;}
   }
  }
+ await collectShaderDiagnostics();
  if(failure)throw failure;if(gpuFault)throw Error(gpuFault);
  if(!validDetections(result))throw Error('Invalid GPU output');
  if(paddingOutput(result,src.width,src.height))throw Error('GPU output matches input-padding corruption');

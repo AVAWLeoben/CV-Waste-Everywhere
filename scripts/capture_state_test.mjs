@@ -105,3 +105,9 @@ vm.runInContext("cpuOnly=false;gpuChecks=2;model={device:'webgpu',predict:async(
 assert.deepEqual(await vm.runInContext('predictWithFallback(frame,{})',scope),good);
 assert.match(vm.runInContext('diagnostics.gpuError',scope),/padding/);
 console.log('PASS: two CPU comparisons, GPU-only after verification, later validation failure, silent mismatch and padding fallback');
+vm.runInContext(`globalThis.GPUDevice=class {createShaderModule(d){return {getCompilationInfo:async()=>({messages:[{type:'error',message:'Not a valid statement',lineNum:2,linePos:1}]})}}};installShaderDiagnostics();new GPUDevice().createShaderModule({label:'test',code:'loop {\\n;\\ncontinuing {}\\n}'});`,scope);
+await vm.runInContext('collectShaderDiagnostics()',scope);
+assert.equal(vm.runInContext('diagnostics.shaderCapture',scope),'enabled');
+assert.match(vm.runInContext('diagnostics.shaderErrors[0].messages[0].source',scope),/2: ;/);
+assert.equal(vm.runInContext('diagnostics.shaderErrors[0].messages[0].message',scope),'Not a valid statement');
+console.log('PASS: shader compiler message, line number and source excerpt capture');
